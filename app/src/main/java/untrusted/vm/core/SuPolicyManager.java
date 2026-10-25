@@ -35,6 +35,7 @@ public class SuPolicyManager {
         public String getCommand() { return command; }
         public long getTimestamp() { return timestamp; }
         public boolean isGranted() { return granted; }
+        public String getAction() { return granted ? "ALLOW" : "DENY"; }
     }
 
     private final int vmId;
