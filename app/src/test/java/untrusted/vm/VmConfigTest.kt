@@ -71,4 +71,14 @@ class VmConfigTest {
         assertFalse(parsed.isRootEnabled)
         assertEquals("VM 1", parsed.name)
     }
+
+    @Test
+    fun testBaseRomIdRoundTripAndLegacyDefault() {
+        val config = VmConfig(id = 7, name = "ROM VM").withBaseRom("android-9-pure")
+        assertEquals("android-9-pure", VmConfig.fromJson(config.toJson()).baseRomId)
+
+        // Configs written before baseRomId existed must still load.
+        val legacy = JSONObject().put("id", 8).put("name", "Old").toString()
+        assertEquals("", VmConfig.fromJson(legacy).baseRomId)
+    }
 }

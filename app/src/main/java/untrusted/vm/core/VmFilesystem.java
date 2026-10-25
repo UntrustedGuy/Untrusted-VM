@@ -44,11 +44,8 @@ public class VmFilesystem {
      * to the physical file location in the sandboxed host rootfs.
      */
     public File resolveGuestFile(String guestPath) {
-        if (guestPath == null || guestPath.isEmpty() || guestPath.equals("/")) {
-            return rootfsDir;
-        }
-        String cleanPath = guestPath.startsWith("/") ? guestPath.substring(1) : guestPath;
-        return new File(rootfsDir, cleanPath);
+        // chroot-style: ".." can never climb out of the instance rootfs.
+        return untrusted.vm.rom.SafePaths.clampGuestPath(rootfsDir, guestPath);
     }
 
     public boolean initializeSkeleton() {

@@ -74,4 +74,17 @@ class VmFilesystemTest {
         assertTrue(deleted)
         assertFalse(tempDir.exists())
     }
+
+    @Test
+    fun testResolveGuestFileCannotEscapeRootfs() {
+        filesystem.initializeSkeleton()
+        val root = filesystem.rootfsDir.canonicalFile
+        for (evil in listOf("../../etc/passwd", "/../../../x", "system/../../../../y", "..")) {
+            val resolved = filesystem.resolveGuestFile(evil).canonicalFile
+            assertTrue("escaped for $evil: $resolved",
+                resolved == root || resolved.path.startsWith(root.path + File.separator))
+        }
+        assertEquals(File(filesystem.rootfsDir, "sdcard/Download"), filesystem.resolveGuestFile("/sdcard/Download"))
+        assertEquals(filesystem.rootfsDir, filesystem.resolveGuestFile("/"))
+    }
 }

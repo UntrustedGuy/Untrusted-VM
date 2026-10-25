@@ -18,12 +18,14 @@ data class VmConfig @JvmOverloads constructor(
     val cpuCores: Int = 4,
     val enableGoogleServices: Boolean = false,
     val autoStart: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val baseRomId: String = ""
 ) {
     fun withRootEnabled(newRootState: Boolean): VmConfig = copy(isRootEnabled = newRootState)
     fun withResolution(width: Int, height: Int): VmConfig = copy(resolutionWidth = width, resolutionHeight = height)
     fun withDpi(newDpi: Int): VmConfig = copy(dpi = newDpi)
     fun withAndroidVersion(newVersion: String): VmConfig = copy(androidVersion = newVersion)
+    fun withBaseRom(romId: String): VmConfig = copy(baseRomId = romId)
 
     fun isEnableGoogleServices(): Boolean = enableGoogleServices
     fun isAutoStart(): Boolean = autoStart
@@ -42,6 +44,7 @@ data class VmConfig @JvmOverloads constructor(
         json.put("enableGoogleServices", enableGoogleServices)
         json.put("autoStart", autoStart)
         json.put("createdAt", createdAt)
+        json.put("baseRomId", baseRomId)
         return json.toString()
     }
 
@@ -63,7 +66,8 @@ data class VmConfig @JvmOverloads constructor(
                 cpuCores = json.optInt("cpuCores", 4),
                 enableGoogleServices = json.optBoolean("enableGoogleServices", false),
                 autoStart = json.optBoolean("autoStart", false),
-                createdAt = json.optLong("createdAt", System.currentTimeMillis())
+                createdAt = json.optLong("createdAt", System.currentTimeMillis()),
+                baseRomId = json.optString("baseRomId", "")
             )
         }
     }
