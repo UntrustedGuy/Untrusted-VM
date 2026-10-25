@@ -13,14 +13,63 @@ import java.util.zip.ZipFile
  * escapes, entry-count bombs and decompression bombs (the byte cap counts bytes actually
  * written, not what the zip header claims).
  *
- * Not supported yet: raw .img files (they're ext4/sparse images and can't be mounted
- * without root), and symlinks inside the archive (java.util.zip doesn't expose them).
+ * Zips can't carry symlinks here (java.util.zip doesn't expose them); ROMs that need them
+ * ship as ext4 images, handled by [extractAny] / ImageExtractor.
  */
 object RomExtractor {
 
     sealed class Outcome {
         data class Ok(val files: Int, val bytes: Long, val strippedPrefix: String) : Outcome()
         data class Fail(val reason: String) : Outcome()
+        object Cancelled : Outcome()
+    }
+
+    enum class Kind { ZIP, XZ, SPARSE, EXT4, UNKNOWN }
+
+    /** Identify a ROM file by its magic bytes (file names lie; this doesn't). */
+    fun sniff(file: File): Kind {
+        java.io.RandomAccessFile(file, "r").use { r ->
+            val head = ByteArray(6)
+            val n = r.read(head)
+            if (n >= 4 && head[0] == 0x50.toByte() && head[1] == 0x4B.toByte() &&
+                (head[2] == 3.toByte() || head[2] == 5.toByte())) return Kind.ZIP
+            if (n >= 6 && head[0] == 0xFD.toByte() && head[1] == 0x37.toByte() && head[2] == 0x7A.toByte() &&
+                head[3] == 0x58.toByte() && head[4] == 0x5A.toByte() && head[5] == 0.toByte()) return Kind.XZ
+            if (n >= 4 && SparseImage.hasMagic(head)) return Kind.SPARSE
+            if (r.length() > 1082) {
+                val m = ByteArray(2)
+                r.seek(1080)
+                r.readFully(m)
+                if (m[0] == 0x53.toByte() && m[1] == 0xEF.toByte()) return Kind.EXT4
+            }
+        }
+        return Kind.UNKNOWN
+    }
+
+    /**
+     * Extracts any supported ROM container: a zip of the file tree, a raw or sparse ext4 image,
+     * or either of those xz-compressed (e.g. a GSI ".img.xz"). Image extraction uses [tmpDir]
+     * for a temporary raw image.
+     */
+    fun extractAny(
+        archive: File,
+        destDir: File,
+        tmpDir: File,
+        ops: FsOps,
+        maxBytes: Long = DEFAULT_MAX_BYTES,
+        maxEntries: Int = DEFAULT_MAX_ENTRIES,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (Float) -> Unit = {}
+    ): Outcome {
+        val kind = try { sniff(archive) } catch (e: Exception) {
+            return Outcome.Fail("cannot read the ROM file: ${e.message}")
+        }
+        return when (kind) {
+            Kind.ZIP -> extract(archive, destDir, maxBytes, maxEntries, onProgress, isCancelled)
+            Kind.XZ, Kind.SPARSE, Kind.EXT4 ->
+                ImageExtractor.extract(archive, destDir, tmpDir, kind, ops, maxBytes, maxEntries, isCancelled, onProgress)
+            Kind.UNKNOWN -> Outcome.Fail("Unrecognised ROM format. Expected a .zip, .img or .img.xz file.")
+        }
     }
 
     const val DEFAULT_MAX_BYTES = 12L * 1024 * 1024 * 1024
@@ -31,7 +80,8 @@ object RomExtractor {
         destDir: File,
         maxBytes: Long = DEFAULT_MAX_BYTES,
         maxEntries: Int = DEFAULT_MAX_ENTRIES,
-        onProgress: (Float) -> Unit = {}
+        onProgress: (Float) -> Unit = {},
+        isCancelled: () -> Boolean = { false }
     ): Outcome {
         val zip = try {
             ZipFile(archive)
@@ -59,6 +109,7 @@ object RomExtractor {
             var written = 0L
             var files = 0
             for ((entry, full) in named) {
+                if (isCancelled()) return Outcome.Cancelled
                 val rel = when {
                     prefix.isEmpty() -> full
                     full == prefix.trimEnd('/') -> continue // the wrapper directory itself

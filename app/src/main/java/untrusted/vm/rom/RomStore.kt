@@ -8,7 +8,11 @@ import java.io.File
  * Installs are atomic: extraction happens in a staging dir that is renamed into place only
  * after it fully succeeds, so a crash or bad archive never leaves a half-installed ROM.
  */
-class RomStore(private val romsDir: File) {
+class RomStore(
+    private val romsDir: File,
+    private val fsOps: FsOps,
+    private val tmpDir: File = File(romsDir, ".tmp")
+) {
 
     data class InstalledRom(
         val id: String,
@@ -53,7 +57,10 @@ class RomStore(private val romsDir: File) {
         data class Fail(val reason: String) : InstallResult()
     }
 
-    init { romsDir.mkdirs() }
+    init {
+        romsDir.mkdirs()
+        SafePaths.deleteTree(tmpDir) // leftovers from a crashed install
+    }
 
     private fun dirOf(id: String): File {
         require(RomCatalog.isValidId(id)) { "invalid rom id: $id" }
@@ -71,7 +78,7 @@ class RomStore(private val romsDir: File) {
 
     fun get(id: String): InstalledRom? = list().firstOrNull { it.id == id }
 
-    fun remove(id: String): Boolean = dirOf(id).let { !it.exists() || it.deleteRecursively() }
+    fun remove(id: String): Boolean = dirOf(id).let { !it.exists() || SafePaths.deleteTree(it) }
 
     /** Reads the handful of build.prop keys we care about from an installed ROM. */
     fun readBuildProp(id: String): Map<String, String> {
@@ -83,13 +90,23 @@ class RomStore(private val romsDir: File) {
             .associate { it.substringBefore('=').trim() to it.substringAfter('=').trim() }
     }
 
-    fun install(meta: InstalledRom, archive: File, onProgress: (Float) -> Unit = {}): InstallResult {
+    fun install(
+        meta: InstalledRom,
+        archive: File,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (Float) -> Unit = {}
+    ): InstallResult {
         if (!RomCatalog.isValidId(meta.id)) return InstallResult.Fail("invalid rom id")
         val staging = File(romsDir, ".staging-${meta.id}-${System.nanoTime()}")
         try {
             staging.mkdirs()
-            when (val r = RomExtractor.extract(archive, File(staging, "base"), onProgress = onProgress)) {
+            val outcome = RomExtractor.extractAny(
+                archive, File(staging, "base"), tmpDir, fsOps,
+                isCancelled = isCancelled, onProgress = onProgress
+            )
+            when (val r = outcome) {
                 is RomExtractor.Outcome.Fail -> return InstallResult.Fail(r.reason)
+                RomExtractor.Outcome.Cancelled -> return InstallResult.Fail("Cancelled")
                 is RomExtractor.Outcome.Ok -> {
                     File(staging, "meta.json").writeText(meta.toJson())
                     val finalDir = dirOf(meta.id)
@@ -101,63 +118,74 @@ class RomStore(private val romsDir: File) {
                         if (old.exists()) old.renameTo(finalDir) // roll back
                         return InstallResult.Fail("cannot move ROM into place")
                     }
-                    old.deleteRecursively()
+                    SafePaths.deleteTree(old)
                     return InstallResult.Ok(meta, r.files, r.bytes)
                 }
             }
         } catch (e: Exception) {
             return InstallResult.Fail("install failed: ${e.message ?: e.javaClass.simpleName}")
         } finally {
-            if (staging.exists()) staging.deleteRecursively()
+            if (staging.exists()) SafePaths.deleteTree(staging)
         }
     }
 
     /**
-     * Copies the installed ROM's tree into an instance rootfs. Top-level dirs listed in
-     * [keepIfExists] (user data) are never overwritten once the instance has them.
-     * Full copy for now; copy-on-write layering arrives with the native engine.
+     * Copies the installed ROM's tree into an instance rootfs, preserving symlinks and modes.
+     * Top-level dirs listed in [keepIfExists] (user data) are never overwritten once the
+     * instance has them. Full copy for now; copy-on-write layering arrives with the engine.
      */
     fun copyBaseInto(
         id: String,
         rootfsDir: File,
         keepIfExists: Set<String> = setOf("data", "sdcard", "storage"),
+        isCancelled: () -> Boolean = { false },
         onProgress: (Float) -> Unit = {}
     ): Boolean {
         val base = baseDir(id)
         if (!base.isDirectory) return false
         rootfsDir.mkdirs()
         val tops = base.listFiles() ?: return false
-        val all = tops.flatMap { top -> top.walkTopDown().filter { it.isFile }.toList() }
+        val total = maxOf(1, countEntries(base))
         var done = 0
+
+        fun copyNode(src: File, dst: File): Boolean {
+            if (isCancelled()) return false
+            val link = fsOps.readLink(src)
+            when {
+                link != null -> fsOps.symlink(link, dst)
+                src.isDirectory -> {
+                    if (!dst.mkdirs() && !dst.isDirectory) return false
+                    for (c in src.listFiles() ?: return false) if (!copyNode(c, File(dst, c.name))) return false
+                    val m = fsOps.mode(src)
+                    if (m >= 0) fsOps.chmod(dst, m or 0x1C0)
+                }
+                else -> {
+                    src.copyTo(dst, overwrite = true)
+                    val m = fsOps.mode(src)
+                    if (m >= 0) fsOps.chmod(dst, m or 0x180)
+                }
+            }
+            if (++done % 256 == 0) onProgress((done.toFloat() / total).coerceIn(0f, 1f))
+            return true
+        }
+
         for (top in tops) {
             val target = File(rootfsDir, top.name)
-            if (top.name in keepIfExists && target.exists()) continue
-            if (target.exists() && !target.deleteRecursively()) return false
-            if (top.isDirectory) {
-                for (src in top.walkTopDown()) {
-                    val rel = src.relativeTo(base).path
-                    val dst = File(rootfsDir, rel)
-                    if (src.isDirectory) {
-                        dst.mkdirs()
-                    } else {
-                        dst.parentFile?.mkdirs()
-                        src.copyTo(dst, overwrite = true)
-                        if (src.canExecute()) dst.setExecutable(true, false)
-                        done++
-                        if (all.isNotEmpty()) onProgress(done.toFloat() / all.size)
-                    }
-                }
-            } else {
-                copyFileTo(top, target)
-                done++
-            }
+            val exists = target.exists() || fsOps.readLink(target) != null
+            if (top.name in keepIfExists && exists) continue
+            if (exists && !SafePaths.deleteTree(target)) return false
+            if (!copyNode(top, target)) return false
         }
         onProgress(1f)
         return true
     }
 
-    private fun copyFileTo(src: File, dst: File) {
-        dst.parentFile?.mkdirs()
-        src.copyTo(dst, overwrite = true)
+    private fun countEntries(dir: File): Int {
+        var n = 0
+        for (c in dir.listFiles() ?: return 0) {
+            n++
+            if (c.isDirectory && fsOps.readLink(c) == null) n += countEntries(c)
+        }
+        return n
     }
 }

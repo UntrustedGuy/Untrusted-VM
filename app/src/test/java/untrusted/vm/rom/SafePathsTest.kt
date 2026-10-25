@@ -39,4 +39,21 @@ class SafePathsTest {
             outside.deleteRecursively()
         } finally { tmp.deleteRecursively() }
     }
+
+    @Test fun deleteTreeDoesNotFollowSymlinks() {
+        val tmp = Files.createTempDirectory("dt").toFile()
+        try {
+            val outside = File(tmp, "outside").apply { mkdirs() }
+            File(outside, "keep.txt").writeText("x")
+            val tree = File(tmp, "tree").apply { mkdirs() }
+            Files.createSymbolicLink(File(tree, "link").toPath(), outside.toPath())
+            Files.createSymbolicLink(File(tree, "dangling").toPath(), File("/nonexistent/target").toPath())
+            File(tree, "real.txt").writeText("y")
+            assertTrue(SafePaths.isSymlink(File(tree, "link")))
+            assertFalse(SafePaths.isSymlink(File(tree, "real.txt")))
+            assertTrue(SafePaths.deleteTree(tree))
+            assertFalse(tree.exists())
+            assertTrue("target of symlink must survive", File(outside, "keep.txt").exists())
+        } finally { SafePaths.deleteTree(tmp) }
+    }
 }

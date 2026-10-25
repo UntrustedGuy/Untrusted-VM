@@ -86,12 +86,12 @@ fun RomManagerScreen(
         if (uri != null) {
             val name = displayNameOf(context, uri)
             runTask("Imported $name") {
-                val tmp = File(context.cacheDir, "import-${System.nanoTime()}.zip")
+                val tmp = File(context.cacheDir, "import-${System.nanoTime()}.rom")
                 try {
                     stage = "Copying file"
                     val input = context.contentResolver.openInputStream(uri) ?: return@runTask "Cannot read that file."
                     input.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
-                    romManager.installLocalArchive(tmp, name) { s, p -> stage = s; progress = p }
+                    romManager.installLocalArchive(tmp, name, cancel) { s, p -> stage = s; progress = p }
                 } finally {
                     tmp.delete()
                 }
@@ -149,13 +149,13 @@ fun RomManagerScreen(
             Text("ROM Catalog", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
             RomCard {
                 Text(
-                    "Paste the https URL of a ROM catalog you trust. Nothing is built in, and every download is checksum-verified.",
+                    "Built-in ROMs are listed below. You can add your own https catalog URL too; every download is checksum-verified.",
                     color = TextSecondary, fontSize = 12.sp
                 )
                 OutlinedTextField(
                     value = catalogUrl,
                     onValueChange = { catalogUrl = it },
-                    label = { Text("Catalog URL (https://...)") },
+                    label = { Text("Extra catalog URL (optional, https://...)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -179,7 +179,7 @@ fun RomManagerScreen(
                     enabled = !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = NeonViolet),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Save & Refresh Catalog") }
+                ) { Text("Save & Refresh My Catalog") }
             }
 
             val compatible = catalog.filter { romManager.isCompatible(it) }
@@ -212,7 +212,7 @@ fun RomManagerScreen(
             // ---- Installed ----
             Text("Installed ROMs", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
             if (installed.isEmpty()) {
-                Text("Nothing installed yet. Download one from a catalog or import a ROM zip below.", color = TextSecondary, fontSize = 12.sp)
+                Text("Nothing installed yet. Download one from the catalog or import a ROM file below.", color = TextSecondary, fontSize = 12.sp)
             }
             installed.forEach { rom ->
                 RomCard {
@@ -225,7 +225,7 @@ fun RomManagerScreen(
                         Button(
                             onClick = {
                                 runTask("Applied ${rom.name} to this VM") {
-                                    romManager.applyToInstance(rom.id, instance) { s, p -> stage = s; progress = p }
+                                    romManager.applyToInstance(rom.id, instance, cancel) { s, p -> stage = s; progress = p }
                                 }
                             },
                             enabled = !busy && vmState == VmState.STOPPED,
@@ -246,19 +246,19 @@ fun RomManagerScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.FolderOpen, contentDescription = null, tint = NeonCyan)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Import a ROM zip", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                    Text("Import a ROM file", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                 }
                 Text(
-                    "A zip of the ROM's file tree (system/, vendor/, ...). Raw .img files can't be used without root. " +
-                        "Free space needed is roughly 2-3x the zip size while importing.",
+                    "Accepts a .zip of the ROM's file tree, or a .img / .img.xz system image (converted on-device, no root needed). " +
+                        "Free space needed is roughly 3-5x the file size while importing.",
                     color = TextSecondary, fontSize = 12.sp
                 )
                 OutlinedButton(
-                    onClick = { picker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
+                    onClick = { picker.launch(arrayOf("*/*")) },
                     enabled = !busy,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Choose ROM zip...") }
+                ) { Text("Choose ROM file...") }
             }
         }
     }
@@ -340,5 +340,5 @@ private fun displayNameOf(context: Context, uri: Uri): String {
     } catch (_: Exception) {
         null
     }
-    return name ?: "local-rom.zip"
+    return name ?: "local-rom.img.xz"
 }

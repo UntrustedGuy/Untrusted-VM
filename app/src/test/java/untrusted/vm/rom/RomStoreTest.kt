@@ -12,8 +12,8 @@ import java.util.zip.ZipOutputStream
 class RomStoreTest {
     private lateinit var tmp: File
     private lateinit var store: RomStore
-    @Before fun setUp() { tmp = Files.createTempDirectory("rs").toFile(); store = RomStore(File(tmp, "roms")) }
-    @After fun tearDown() { tmp.deleteRecursively() }
+    @Before fun setUp() { tmp = Files.createTempDirectory("rs").toFile(); store = RomStore(File(tmp, "roms"), JvmFsOps) }
+    @After fun tearDown() { SafePaths.deleteTree(tmp) }
 
     private fun zip(vararg entries: Pair<String, String>): File {
         val f = File(tmp, "r${System.nanoTime()}.zip")
@@ -47,6 +47,33 @@ class RomStoreTest {
         store.install(meta("r"), zip("system/v" to "two"))
         assertEquals("two", File(store.baseDir("r"), "system/v").readText())
         assertEquals(1, store.list().size)
+    }
+
+    @Test fun installsFromImageAndKeepsSymlinksWhenApplied() {
+        val img = TestData.resource("tiny.ext4", tmp)
+        val xz = File(tmp, "g.img.xz").also { TestData.xz(img, it) }
+        assertTrue(store.install(meta("gsi"), xz) is RomStore.InstallResult.Ok)
+        assertEquals("8.1.0", store.readBuildProp("gsi")["ro.build.version.release"])
+
+        val rootfs = File(tmp, "rootfs")
+        assertTrue(store.copyBaseInto("gsi", rootfs))
+        val problems = Manifest(TestData.resourceText("tiny.expected")).verify(rootfs)
+        assertTrue("applied tree differs: $problems", problems.isEmpty())
+    }
+
+    @Test fun removeAndReapplyNeverFollowSymlinksOutOfTheRom() {
+        // A hostile ROM: a symlink pointing at a directory outside the ROM store.
+        val outside = File(tmp, "precious").apply { mkdirs() }
+        File(outside, "keep.txt").writeText("do not delete")
+        store.install(meta("evil"), zip("system/build.prop" to "k=v"))
+        JvmFsOps.symlink(outside.absolutePath, File(store.baseDir("evil"), "system/escape"))
+
+        val rootfs = File(tmp, "rootfs")
+        assertTrue(store.copyBaseInto("evil", rootfs))
+        assertEquals(outside.absolutePath, JvmFsOps.readLink(File(rootfs, "system/escape")))   // copied as a link, not followed
+        assertTrue(store.copyBaseInto("evil", rootfs))                                         // re-apply wipes system/ safely
+        assertTrue(store.remove("evil"))
+        assertEquals("do not delete", File(outside, "keep.txt").readText())
     }
 
     @Test fun rejectsInvalidIds() {

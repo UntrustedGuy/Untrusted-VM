@@ -55,4 +55,24 @@ object SafePaths {
         val destCanon = dest.canonicalPath
         return if (destCanon == baseCanon || destCanon.startsWith(baseCanon + File.separator)) dest else null
     }
+
+    /**
+     * True if [f] is a symlink to something that exists. (Dangling links report false, which is
+     * fine for deletion: a dangling link is not a directory, so it is simply unlinked.)
+     */
+    @JvmStatic
+    fun isSymlink(f: File): Boolean {
+        val abs = f.absoluteFile
+        val parent = abs.parentFile ?: return false
+        return abs.canonicalPath != File(parent.canonicalFile, abs.name).path
+    }
+
+    /** Recursive delete that never descends into symlinked directories. ROM trees are full of symlinks. */
+    @JvmStatic
+    fun deleteTree(f: File): Boolean {
+        if (f.isDirectory && !isSymlink(f)) {
+            f.listFiles()?.forEach { deleteTree(it) }
+        }
+        return f.delete() || !f.exists()
+    }
 }

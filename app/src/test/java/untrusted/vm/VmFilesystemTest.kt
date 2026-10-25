@@ -87,4 +87,19 @@ class VmFilesystemTest {
         assertEquals(File(filesystem.rootfsDir, "sdcard/Download"), filesystem.resolveGuestFile("/sdcard/Download"))
         assertEquals(filesystem.rootfsDir, filesystem.resolveGuestFile("/"))
     }
+
+    @Test
+    fun testSymlinksAreNeverFollowedBySizeOrDelete() {
+        filesystem.initializeSkeleton()
+        val outside = Files.createTempDirectory("untrusted_outside_").toFile()
+        File(outside, "keep.txt").writeText("keep me")
+        val system = File(filesystem.rootfsDir, "system").apply { mkdirs() }
+        java.nio.file.Files.createSymbolicLink(File(system, "escape").toPath(), outside.toPath())
+        java.nio.file.Files.createSymbolicLink(File(system, "cycle").toPath(), system.toPath()) // would recurse forever if followed
+
+        filesystem.calculateTotalSizeBytes() // must terminate
+        assertTrue(filesystem.deleteInstanceFiles())
+        assertEquals("keep me", File(outside, "keep.txt").readText())
+        outside.deleteRecursively()
+    }
 }

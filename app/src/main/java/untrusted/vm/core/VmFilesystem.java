@@ -92,6 +92,8 @@ public class VmFilesystem {
         File[] files = dir.listFiles();
         if (files == null) return 0L;
         for (File f : files) {
+            // Never follow symlinks: ROM trees contain them, and a cycle would recurse forever.
+            if (untrusted.vm.rom.SafePaths.isSymlink(f)) continue;
             size += f.isDirectory() ? calculateDirSize(f) : f.length();
         }
         return size;
@@ -123,14 +125,7 @@ public class VmFilesystem {
     }
 
     private boolean deleteRecursively(File file) {
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    deleteRecursively(child);
-                }
-            }
-        }
-        return file.delete();
+        // Symlink-safe: never descends into a symlinked directory (could escape the instance).
+        return untrusted.vm.rom.SafePaths.deleteTree(file);
     }
 }

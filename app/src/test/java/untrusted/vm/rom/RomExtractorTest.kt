@@ -12,7 +12,7 @@ import java.util.zip.ZipOutputStream
 class RomExtractorTest {
     private lateinit var tmp: File
     @Before fun setUp() { tmp = Files.createTempDirectory("rx").toFile() }
-    @After fun tearDown() { tmp.deleteRecursively() }
+    @After fun tearDown() { SafePaths.deleteTree(tmp) }
 
     private fun zip(name: String, vararg entries: Pair<String, String>): File {
         val f = File(tmp, name)
