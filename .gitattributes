@@ -1,0 +1,17 @@
+# Ensure gradlew and shell scripts always have LF line endings
+* text=auto
+gradlew text eol=lf
+*.sh text eol=lf
+*.cpp text
+*.h text
+*.kt text
+*.java text
+*.gradle text
+*.gradle.kts text
+*.properties text
+*.xml text
+*.json text
+*.md text
+*.png binary
+*.jar binary
+*.so binary
