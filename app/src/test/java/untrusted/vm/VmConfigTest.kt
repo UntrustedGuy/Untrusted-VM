@@ -1,5 +1,6 @@
 package untrusted.vm
 
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import untrusted.vm.core.VmConfig
@@ -32,8 +33,9 @@ class VmConfigTest {
         )
 
         val jsonStr = config.toJson()
-        assertTrue(jsonStr.contains("\"isRootEnabled\": true"))
-        assertTrue(jsonStr.contains("\"name\": \"Rooted Sandbox\""))
+        val jsonObj = JSONObject(jsonStr)
+        assertTrue(jsonObj.getBoolean("isRootEnabled"))
+        assertEquals("Rooted Sandbox", jsonObj.getString("name"))
 
         val parsed = VmConfig.fromJson(jsonStr)
         assertEquals(config.id, parsed.id)
@@ -54,7 +56,8 @@ class VmConfigTest {
         )
 
         val jsonStr = config.toJson()
-        assertTrue(jsonStr.contains("\"isRootEnabled\": false"))
+        val jsonObj = JSONObject(jsonStr)
+        assertFalse(jsonObj.getBoolean("isRootEnabled"))
 
         val parsed = VmConfig.fromJson(jsonStr)
         assertFalse(parsed.isRootEnabled)
