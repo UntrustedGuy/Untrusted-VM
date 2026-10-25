@@ -1,25 +1,35 @@
 package untrusted.vm.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.view.ViewGroup
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import untrusted.vm.core.VmInstance
+import untrusted.vm.service.FloatingVmService
 import untrusted.vm.ui.components.FloatingVmControls
 import untrusted.vm.ui.components.RootBadge
+import untrusted.vm.ui.components.VmSurfaceView
 import untrusted.vm.ui.theme.*
 
+/**
+ * Fullscreen live virtual machine display screen.
+ * Hosts the hardware-accelerated VmSurfaceView rendering guest frames at 60 FPS
+ * and provides navigation controls including Floating Window overlay toggle.
+ */
 @Composable
 fun VmDisplayScreen(
     instance: VmInstance,
@@ -27,20 +37,16 @@ fun VmDisplayScreen(
     onOpenTerminal: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    val context = LocalContext.current
     val config by instance.config.collectAsState()
-    val state by instance.state.collectAsState()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // Virtual Machine Display Frame
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Guest Status Bar
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Guest Status & Resolution Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -58,43 +64,55 @@ fun VmDisplayScreen(
                 RootBadge(isRootEnabled = config.isRootEnabled)
             }
 
-            // Virtual Screen Canvas / Viewport
+            // Real Hardware-Accelerated Virtual Surface
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .background(Color(0xFF0F172A))
-                    .border(1.dp, DarkCardBorder),
-                contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Untrusted VM #${instance.id}",
-                        style = androidx.compose.material3.MaterialTheme.typography.headlineMedium,
-                        color = NeonCyan
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Android ${config.androidVersion} Sandbox Container",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = if (config.isRootEnabled) "Simulated Root Active (/system/xbin/su)" else "Standard Userland (Non-root)",
-                        color = if (config.isRootEnabled) NeonGreen else TextMuted,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp
-                    )
-                }
+                AndroidView(
+                    factory = { ctx ->
+                        VmSurfaceView(ctx, instance).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
 
-        // Overlay Floating Navigation Bar
+        // Overlay Navigation Controls (Home, Back, Terminal, Floating Window, Settings)
         FloatingVmControls(
             onBackClick = onBackToDashboard,
-            onHomeClick = { /* Send HOME key event to guest */ },
+            onHomeClick = {
+                // Send standard Android KEYCODE_HOME (3) to the guest container
+                instance.engine.injectKey(3, 0)
+                instance.engine.injectKey(3, 1)
+            },
             onTerminalClick = onOpenTerminal,
+            onFloatingWindowClick = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                } else {
+                    val intent = Intent(context, FloatingVmService::class.java).apply {
+                        action = FloatingVmService.ACTION_START_FLOATING
+                        putExtra(FloatingVmService.EXTRA_VM_ID, instance.id)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                    onBackToDashboard()
+                }
+            },
             onSettingsClick = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.BottomCenter)

@@ -1,78 +1,102 @@
 # Untrusted VM
 
-[![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://android.com)
-[![Package](https://img.shields.io/badge/Package-untrusted.vm-blue.svg)](https://github.com/UntrustedGuy/Untrusted-VM)
-[![Architecture](https://img.shields.io/badge/Architecture-Userspace%20Container-purple.svg)](https://github.com/UntrustedGuy/Untrusted-VM)
+A high-performance, standalone Android-in-Android virtualization container app with per-instance root support, running on non-rooted Android host devices without requiring Shizuku, root, or PC-based activations.
 
-<p align="center">
-  <img src="app/src/main/ic_launcher-web.png" width="160" height="160" alt="Untrusted VM Icon" />
-</p>
-
-**Untrusted VM** is an Android virtualization and sandboxing container platform inspired by VMOS Pro. It allows running isolated guest Android userland environments on stock, unrooted Android devices **without requiring Shizuku, physical device root, or host-level kernel modifications**.
-
-Each virtual machine instance operates in a dedicated, multi-process Android service (`:vms01`, `:vms02`, etc.) and features an independent, per-instance **Simulated Root Option**.
-
----
-
-## Key Features
-
-- **No Shizuku / No Host Root Required**: Runs entirely in unprivileged Android application space. The host operating system remains 100% stock, secure, and unmodified.
-- **Per-Instance Simulated Root Toggle**:
-  - Each VM instance can independently toggle Root access on or off in VM Settings.
-  - When enabled: Provisions simulated `/system/xbin/su` inside the guest filesystem, updates `build.prop` (`ro.build.tags=test-keys`, `ro.debuggable=1`), and grants guest UID 0 to guest apps requesting superuser permissions.
-  - When disabled: Completely unlinks and masks the `su` binary from the guest environment, returning clean `release-keys` properties to pass guest integrity and root detection checks.
-- **Multi-Process Architecture (`:vms01` - `:vms04`)**:
-  - Emulates VMOS Pro's multi-process isolation model.
-  - Container crashes inside a guest environment do not bring down the main host UI process.
-  - IPC communication handled via AIDL interfaces (`IVmService`, `IVmCallback`).
-- **Modern Jetpack Compose Dark Theme UI**:
-  - High-tech cybernetic dark theme with deep obsidian backgrounds, neon cyan, electric purple, and emerald root accents.
-  - Instance cards with quick status indicators, RAM allocation, and instant root toggles.
-  - Built-in Root Terminal shell to execute and verify guest commands (`id`, `su`, `getprop`, `which su`).
-  - Floating navigation overlay for the virtual screen viewport.
+Inspired by the reverse-engineering analysis of VMOS Pro (`vmospro.apk`).
 
 ---
 
 ## Architecture Overview
 
+Untrusted VM operates as an unprivileged user-space container (running under stock Android app UID `10xxx`) that isolates and executes guest Android environments directly on the host Linux kernel.
+
 ```
-Untrusted VM Application
-├── Host UI Process (untrusted.vm)
-│   ├── MainActivity (Jetpack Compose Dark Theme)
-│   ├── VmManager (Instance Lifecycle Orchestrator)
-│   └── DashboardScreen / VmSettingsScreen / TerminalScreen
-│
-├── Multi-Process Container Services
-│   ├── :vms01 (untrusted.vm.service.VmService01)
-│   ├── :vms02 (untrusted.vm.service.VmService02)
-│   └── :vms03 / :vms04
-│
-└── Per-Instance Storage Sandbox (/data/user/0/untrusted.vm/instances/vm_N/)
-    ├── config.json (Instance configuration & root state)
-    ├── rootfs/
-    │   ├── system/
-    │   │   ├── bin/sh
-    │   │   ├── xbin/su (Present when Root is ENABLED, absent when DISABLED)
-    │   │   └── build.prop
-    │   ├── data/ (Guest application and user data)
-    │   └── sdcard/
-    └── logs/ & snapshots/
++-------------------------------------------------------------------------+
+|                              Host Android OS                            |
+|                          (Unprivileged UID 10xxx)                       |
+|                                                                         |
+|  +--------------------+  +----------------------+  +-----------------+  |
+|  | Untrusted VM App UI|  |  FloatingVmService   |  |  HalBoxManager  |  |
+|  |  (VmSurfaceView)   |  | (Overlays at 60 FPS) |  | (Sensors / GPS) |  |
+|  +---------+----------+  +----------+-----------+  +--------+--------+  |
+|            |                        |                       |           |
+|            +-------------------+----+-----------------------+           |
+|                                |                                        |
+|                     JNI (libvmcore.so / C++)                            |
+|                                |                                        |
+|  +--------------------+--------+----------------+--------------------+  |
+|  |   Virtual VFS      |  Native Framebuffer     |  Process Executor  |  |
+|  | (vm_vfs.cpp)       |  (vm_framebuffer.cpp)   |  (vm_process.cpp)  |  |
+|  | - Redirection      |  - Double Buffering     |  - fork() / execve |  |
+|  | - Fake SELinux     |  - Direct Bitmap blit   |  - pipe() IPC      |  |
+|  +--------------------+-------------------------+--------------------+  |
+|                                                                         |
+|                 Multi-Process Services (:vms01 - :vms64)                |
++------------------------------------+------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+|                            Guest VM Instance                            |
+|                                                                         |
+|  Root Enabled (Virtual UID 0)          Root Disabled (Stock Userland)   |
+|  - /system/xbin/su (0755)              - su masked / returns ENOENT     |
+|  - LD_PRELOAD=libvm_preload.so         - ro.build.tags=release-keys     |
+|  - getuid() -> 0                       - getuid() -> 10100              |
+|  - ro.build.tags=test-keys             - Standard Android sandbox       |
++-------------------------------------------------------------------------+
 ```
 
 ---
 
-## Simulated Root Mechanism (VMOS Pro Model)
+## Key Features
 
-Unlike standard Android where root requires flashing Magisk or patching boot images, Untrusted VM's guest environment runs as a userspace container:
+1. **Standalone Non-Root Operation**
+   - Operates completely within stock Android userspace sandboxing.
+   - Zero dependency on Shizuku, wireless debugging bridges, or PC ADB daemons.
 
-1. **Guest UID Virtualization**: Within the container sandbox, guest processes execute under the host app's normal Linux UID, but the container's VFS and syscall layer reports `uid=0(root)` to guest processes requesting root.
-2. **Dynamic `/system/xbin/su` Provisioning**:
-   - `RootController.setRootState(true)` writes the executable `su` wrapper into the guest's isolated `xbin` directory.
-   - When a guest app calls `Runtime.getRuntime().exec("su")`, the command succeeds and spawns an elevated guest shell session.
-   - Toggling the root switch off immediately wipes `/system/xbin/su`, leaving the guest clean for apps that require unrooted environments.
+2. **Per-Instance Virtual Root (`persist.root.enable`)**
+   - Independent root toggle for every virtual machine.
+   - When enabled, `libvm_preload.so` intercepts `getuid()`, `geteuid()`, `getgid()`, `setuid()`, and `capget()` to simulate true root (`uid=0`) for guest apps.
+   - Bundled `/system/xbin/su` binary and `SuPolicyManager` for interactive prompt management (`ALLOW`, `DENY`, `PROMPT`).
+
+3. **High-Performance Display Pipeline (`VmSurfaceView`)**
+   - Dedicated 60 FPS render thread backed by `libvmcore.so` native framebuffer manager.
+   - Low-latency touch event injection mapping host touch coordinates directly into guest viewport resolution.
+
+4. **Floating Window / Picture-in-Picture Mode (`FloatingVmService`)**
+   - Overlays a miniature interactive VM window on top of other Android applications with smooth drag, drop, and resize capabilities.
+
+5. **Hardware Abstraction Layer (`HalBoxManager` & `vm_hal.cpp`)**
+   - Sensor bridge: Forwards host accelerometer, gyroscope, and light sensor events.
+   - Virtual GPS / NMEA: Simulates `$GPGGA` sentences for location spoofing inside the guest.
+   - Power supply sysfs emulation: Generates virtual battery status, temperature, and voltage.
+
+6. **File Transfer Station (`FileTransferStation.kt`)**
+   - Shared bridge between host storage and guest rootfs (`/sdcard/VMOSfiletransferstation`).
+   - Supports importing external APKs, ROM images, and documents into guest storage, and exporting files back to the host.
 
 ---
 
-## License
+## Building from Source
 
-Copyright (c) 2026 UntrustedGuy. All rights reserved.
+### Prerequisites
+- JDK 17
+- Android SDK (API Level 34)
+- Android NDK (r26+ / `26.1.10909125`)
+- CMake 3.22.1+
+
+### Build Commands
+```bash
+# Build the native C++ virtualization libraries (libvmcore.so & libvm_preload.so)
+# and assemble the debug APK:
+./gradlew assembleDebug
+
+# Run the unit test suite:
+./gradlew testDebugUnitTest
+```
+
+---
+
+## Automated CI/CD
+GitHub Actions automated build pipeline configured at `.github/workflows/build.yml`.
+Every push to `main` builds the NDK binaries and generates the debug APK artifact ready for installation.

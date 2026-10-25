@@ -1,8 +1,14 @@
 package untrusted.vm.core;
 
+import android.graphics.Bitmap;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.util.Scanner;
+
 /**
- * Execution engine for guest commands and container environment emulation.
- * Simulates guest Android shell behaviors and handles UID virtualization.
+ * High-performance execution engine for Untrusted VM.
+ * Bridges native container execution (libvmcore.so) with userspace fallback.
  */
 public class VmEngine {
 
@@ -21,6 +27,8 @@ public class VmEngine {
 
     private volatile VmConfig config;
     private static boolean nativeLoaded = false;
+    private String rootfsPath = "";
+    private String preloadPath = "";
 
     static {
         try {
@@ -35,25 +43,49 @@ public class VmEngine {
         return nativeLoaded;
     }
 
-    public static native int nativeInitSandbox(int vmId, String rootfsPath, boolean rootEnabled);
+    // Native JNI method declarations matching vm_core.cpp
+    public static native int nativeInitSandbox(int vmId, String rootfsPath, boolean rootEnabled, int width, int height);
     public static native boolean nativeSetRootOption(int vmId, boolean enabled);
+    public static native ExecutionResult nativeExecuteCommand(
+        int vmId,
+        String command,
+        boolean requestRoot,
+        String rootfsPath,
+        String preloadPath
+    );
+    public static native boolean nativeGetFrameBuffer(int vmId, Bitmap bitmap);
+    public static native void nativeInjectTouch(int vmId, int action, float x, float y, int pointerId);
+    public static native void nativeInjectKey(int vmId, int keyCode, int action);
+    public static native void nativeSetGpsLocation(int vmId, double latitude, double longitude, double altitude);
+    public static native void nativeSetBattery(int vmId, int level, boolean isCharging, int temperature);
+    public static native String nativeTranslatePath(int vmId, String guestPath);
 
     public VmEngine(VmConfig config) {
         this.config = config;
     }
 
+    public void setRootfsPath(String path) {
+        this.rootfsPath = (path != null) ? path : "";
+    }
+
+    public void setPreloadPath(String path) {
+        this.preloadPath = (path != null) ? path : "";
+    }
+
     public void updateConfig(VmConfig newConfig) {
         this.config = newConfig;
+        syncNativeRootOption();
     }
 
     public VmConfig getConfig() {
         return config;
     }
 
-    public int initNativeSandbox(String rootfsPath) {
+    public int initNativeSandbox(String rootfsPath, int width, int height) {
+        this.rootfsPath = rootfsPath;
         if (!nativeLoaded) return 0;
         try {
-            return nativeInitSandbox(config.getId(), rootfsPath, config.isRootEnabled());
+            return nativeInitSandbox(config.getId(), rootfsPath, config.isRootEnabled(), width, height);
         } catch (UnsatisfiedLinkError e) {
             return 0;
         }
@@ -68,13 +100,50 @@ public class VmEngine {
         }
     }
 
+    public boolean renderToBitmap(Bitmap bitmap) {
+        if (!nativeLoaded || bitmap == null) return false;
+        try {
+            return nativeGetFrameBuffer(config.getId(), bitmap);
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
+    public void injectTouch(int action, float x, float y, int pointerId) {
+        if (!nativeLoaded) return;
+        try {
+            nativeInjectTouch(config.getId(), action, x, y, pointerId);
+        } catch (UnsatisfiedLinkError ignored) {}
+    }
+
+    public void injectKey(int keyCode, int action) {
+        if (!nativeLoaded) return;
+        try {
+            nativeInjectKey(config.getId(), keyCode, action);
+        } catch (UnsatisfiedLinkError ignored) {}
+    }
+
+    public void setVirtualGps(double lat, double lng, double alt) {
+        if (!nativeLoaded) return;
+        try {
+            nativeSetGpsLocation(config.getId(), lat, lng, alt);
+        } catch (UnsatisfiedLinkError ignored) {}
+    }
+
+    public void setVirtualBattery(int level, boolean isCharging, int temp) {
+        if (!nativeLoaded) return;
+        try {
+            nativeSetBattery(config.getId(), level, isCharging, temp);
+        } catch (UnsatisfiedLinkError ignored) {}
+    }
+
     public ExecutionResult executeShell(String command, boolean requestRoot) {
         if (command == null || command.trim().isEmpty()) {
             return new ExecutionResult(0, "");
         }
         String trimmed = command.trim();
-        boolean isRoot = requestRoot && config.isRootEnabled();
 
+        // 1. Root policy verification
         if (requestRoot && !config.isRootEnabled()) {
             return new ExecutionResult(
                 1,
@@ -82,6 +151,32 @@ public class VmEngine {
             );
         }
 
+        // 2. Try native process execution inside the container
+        if (nativeLoaded && !rootfsPath.isEmpty()) {
+            try {
+                ExecutionResult res = nativeExecuteCommand(
+                    config.getId(),
+                    trimmed,
+                    requestRoot,
+                    rootfsPath,
+                    preloadPath
+                );
+                if (res != null) {
+                    return res;
+                }
+            } catch (Throwable ignored) {
+                // Fall through to userspace engine
+            }
+        }
+
+        // 3. High-Fidelity Userspace Emulation Fallback (for testing / uncompiled native)
+        return executeUserspaceEmulation(trimmed, requestRoot);
+    }
+
+    private ExecutionResult executeUserspaceEmulation(String trimmed, boolean requestRoot) {
+        boolean isRoot = requestRoot && config.isRootEnabled();
+
+        // ID / WHOAMI
         if (trimmed.equals("id")) {
             if (isRoot) {
                 return new ExecutionResult(0, "uid=0(root) gid=0(root) groups=0(root),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats) context=u:r:su:s0");
@@ -94,29 +189,23 @@ public class VmEngine {
             return new ExecutionResult(0, isRoot ? "root" : "u0_a100");
         }
 
+        // WHICH
         if (trimmed.equals("which su") || trimmed.equals("command -v su")) {
-            if (config.isRootEnabled()) {
-                return new ExecutionResult(0, "/system/xbin/su");
-            } else {
-                return new ExecutionResult(1, "");
-            }
+            return config.isRootEnabled() ? new ExecutionResult(0, "/system/xbin/su") : new ExecutionResult(1, "");
         } else if (trimmed.startsWith("which ") || trimmed.startsWith("command -v ")) {
-            String binaryName = trimmed.substring(trimmed.indexOf(' ') + 1).trim();
-            if (binaryName.equals("su")) {
-                if (config.isRootEnabled()) {
-                    return new ExecutionResult(0, "/system/xbin/su");
-                } else {
-                    return new ExecutionResult(1, "");
-                }
-            } else if (binaryName.equals("sh")) {
+            String bin = trimmed.substring(trimmed.indexOf(' ') + 1).trim();
+            if (bin.equals("su")) {
+                return config.isRootEnabled() ? new ExecutionResult(0, "/system/xbin/su") : new ExecutionResult(1, "");
+            } else if (bin.equals("sh")) {
                 return new ExecutionResult(0, "/system/bin/sh");
-            } else if (binaryName.equals("getprop")) {
+            } else if (bin.equals("getprop")) {
                 return new ExecutionResult(0, "/system/bin/getprop");
             } else {
-                return new ExecutionResult(1, binaryName + " not found");
+                return new ExecutionResult(1, bin + " not found");
             }
         }
 
+        // SU -V
         if (trimmed.equals("su -v") || trimmed.equals("su -V")) {
             if (config.isRootEnabled()) {
                 return new ExecutionResult(0, "UntrustedVM-su v1.0 (VMOS-compatible)");
@@ -125,6 +214,7 @@ public class VmEngine {
             }
         }
 
+        // SU execution
         if (trimmed.equals("su") || trimmed.startsWith("su ") || trimmed.startsWith("su\t")) {
             if (config.isRootEnabled()) {
                 String sub = trimmed.length() > 2 ? trimmed.substring(2).trim() : "";
@@ -145,9 +235,10 @@ public class VmEngine {
             }
         }
 
+        // GETPROP
         if (trimmed.equals("getprop") || trimmed.startsWith("getprop ") || trimmed.startsWith("getprop\t")) {
-            String propName = trimmed.length() > 7 ? trimmed.substring(7).trim() : "";
-            if (propName.isEmpty()) {
+            String prop = trimmed.length() > 7 ? trimmed.substring(7).trim() : "";
+            if (prop.isEmpty()) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("[ro.build.version.release]: [").append(config.getAndroidVersion()).append("]\n");
                 sb.append("[ro.build.type]: [").append(config.isRootEnabled() ? "userdebug" : "user").append("]\n");
@@ -160,7 +251,7 @@ public class VmEngine {
                 return new ExecutionResult(0, sb.toString());
             } else {
                 String val = "";
-                switch (propName) {
+                switch (prop) {
                     case "ro.build.version.release": val = config.getAndroidVersion(); break;
                     case "ro.build.type": val = config.isRootEnabled() ? "userdebug" : "user"; break;
                     case "ro.build.tags": val = config.isRootEnabled() ? "test-keys" : "release-keys"; break;

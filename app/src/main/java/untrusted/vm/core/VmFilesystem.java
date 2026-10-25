@@ -39,6 +39,18 @@ public class VmFilesystem {
     public File getSnapshotsDir() { return snapshotsDir; }
     public File getLogsDir() { return logsDir; }
 
+    /**
+     * Resolves a guest path (e.g. /system/xbin/su or /sdcard/Download)
+     * to the physical file location in the sandboxed host rootfs.
+     */
+    public File resolveGuestFile(String guestPath) {
+        if (guestPath == null || guestPath.isEmpty() || guestPath.equals("/")) {
+            return rootfsDir;
+        }
+        String cleanPath = guestPath.startsWith("/") ? guestPath.substring(1) : guestPath;
+        return new File(rootfsDir, cleanPath);
+    }
+
     public boolean initializeSkeleton() {
         try {
             List<File> dirs = Arrays.asList(
@@ -51,12 +63,15 @@ public class VmFilesystem {
                 new File(dataDir, "app"),
                 new File(dataDir, "data"),
                 new File(dataDir, "system"),
+                new File(dataDir, "local/tmp"),
                 sdcardDir,
+                new File(sdcardDir, "Download"),
+                new File(sdcardDir, "VMOSfiletransferstation"),
                 snapshotsDir,
                 logsDir,
                 new File(rootfsDir, "dev"),
                 new File(rootfsDir, "proc"),
-                new File(rootfsDir, "sys")
+                new File(rootfsDir, "sys/fs/selinux")
             );
             for (File dir : dirs) {
                 if (!dir.exists()) {

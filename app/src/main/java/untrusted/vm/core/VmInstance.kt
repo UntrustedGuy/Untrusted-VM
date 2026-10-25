@@ -18,6 +18,7 @@ class VmInstance(
     val rootController = RootController(id, filesystem.rootDir)
     val suPolicyManager = SuPolicyManager(id)
     val engine = VmEngine(initialConfig)
+    val fileTransferStation = FileTransferStation(filesystem)
 
     private val _config = MutableStateFlow(initialConfig)
     val config: StateFlow<VmConfig> = _config.asStateFlow()
@@ -30,6 +31,12 @@ class VmInstance(
 
     init {
         filesystem.initializeSkeleton()
+        engine.setRootfsPath(filesystem.rootfsDir.absolutePath)
+        engine.initNativeSandbox(
+            filesystem.rootfsDir.absolutePath,
+            initialConfig.resolutionWidth,
+            initialConfig.resolutionHeight
+        )
         // Synchronize initial root state with config
         rootController.setRootState(initialConfig.isRootEnabled)
         engine.syncNativeRootOption()
@@ -69,6 +76,12 @@ class VmInstance(
 
         // Verify rootfs and sync root state
         filesystem.initializeSkeleton()
+        engine.setRootfsPath(filesystem.rootfsDir.absolutePath)
+        engine.initNativeSandbox(
+            filesystem.rootfsDir.absolutePath,
+            _config.value.resolutionWidth,
+            _config.value.resolutionHeight
+        )
         rootController.setRootState(_config.value.isRootEnabled)
         engine.syncNativeRootOption()
 
