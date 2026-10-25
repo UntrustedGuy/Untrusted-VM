@@ -3,6 +3,7 @@ package untrusted.vm.core;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -54,6 +55,10 @@ public class SuPolicyManager {
         return p != null ? p : defaultPolicy;
     }
 
+    public Map<String, Policy> getAllPolicies() {
+        return Collections.unmodifiableMap(packagePolicies);
+    }
+
     public void setDefaultPolicy(Policy policy) {
         this.defaultPolicy = policy;
     }
@@ -103,6 +108,10 @@ public class SuPolicyManager {
         if (requestLogs.size() > 200) {
             requestLogs.remove(0);
         }
+    }
+
+    public synchronized List<SuRequestLog> getRecentLogs() {
+        return getLogs();
     }
 
     public synchronized List<SuRequestLog> getLogs() {

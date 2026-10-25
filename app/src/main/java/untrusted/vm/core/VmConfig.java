@@ -84,6 +84,24 @@ public class VmConfig {
         );
     }
 
+    public VmConfig withDpi(int newDpi) {
+        return new VmConfig(
+            id, name, androidVersion, isRootEnabled,
+            resolutionWidth, resolutionHeight, newDpi,
+            allocatedRamMb, cpuCores, enableGoogleServices,
+            autoStart, createdAt
+        );
+    }
+
+    public VmConfig withAndroidVersion(String newVersion) {
+        return new VmConfig(
+            id, name, newVersion, isRootEnabled,
+            resolutionWidth, resolutionHeight, dpi,
+            allocatedRamMb, cpuCores, enableGoogleServices,
+            autoStart, createdAt
+        );
+    }
+
     public String toJson() {
         try {
             JSONObject obj = new JSONObject();

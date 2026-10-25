@@ -1,5 +1,6 @@
 package untrusted.vm.core
 
+import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -7,11 +8,13 @@ import java.io.File
 
 /**
  * Represents a single virtual machine instance.
- * Encapsulates its isolated filesystem, configuration, root controller, and state.
+ * Encapsulates its isolated filesystem, configuration, root controller, hardware HAL,
+ * audio bridge, virtual ADB network, GPS penetrator, and step simulator.
  */
 class VmInstance(
     initialConfig: VmConfig,
-    baseStorageDir: File
+    baseStorageDir: File,
+    appContext: Context? = null
 ) {
     val id: Int = initialConfig.id
     val filesystem = VmFilesystem(id, File(baseStorageDir, "instances/vm_$id"))
@@ -19,6 +22,20 @@ class VmInstance(
     val suPolicyManager = SuPolicyManager(id)
     val engine = VmEngine(initialConfig)
     val fileTransferStation = FileTransferStation(filesystem)
+    val networkManager = VmNetworkManager(id, filesystem)
+    val stepSimulator = StepCounterSimulator(id, filesystem)
+
+    val halBoxManager = if (appContext != null) {
+        HalBoxManager(appContext, id, engine)
+    } else null
+
+    val gpsPenetrator = if (appContext != null && halBoxManager != null) {
+        GpsPenetrator(appContext, id, filesystem, halBoxManager)
+    } else null
+
+    val audioBridge = if (appContext != null) {
+        AudioBridgeManager(appContext, id, filesystem)
+    } else null
 
     private val _config = MutableStateFlow(initialConfig)
     val config: StateFlow<VmConfig> = _config.asStateFlow()
@@ -85,6 +102,11 @@ class VmInstance(
         rootController.setRootState(_config.value.isRootEnabled)
         engine.syncNativeRootOption()
 
+        // Start Hardware subsystems
+        halBoxManager?.start()
+        audioBridge?.start()
+        networkManager.startAdbBridge(5555)
+
         appendLog("Guest filesystem mounted: ${filesystem.rootfsDir.absolutePath}")
         appendLog("Simulated root: ${if (_config.value.isRootEnabled) "ACTIVE (/system/xbin/su ready)" else "DISABLED"}")
         _state.value = VmState.RUNNING
@@ -102,8 +124,26 @@ class VmInstance(
         }
         _state.value = VmState.STOPPING
         appendLog("Stopping Untrusted VM #$id...")
+
+        // Stop subsystems
+        audioBridge?.stop()
+        networkManager.stopAdbBridge()
+        halBoxManager?.stop()
+        gpsPenetrator?.disablePassThrough()
+        gpsPenetrator?.disableMockLocation()
+        stepSimulator.stop()
+
         _state.value = VmState.STOPPED
         appendLog("Untrusted VM #$id has STOPPED.")
+        return true
+    }
+
+    /**
+     * Clean RAM / Cache drop for VM (VMOS Pro Quick Clean feature).
+     */
+    fun cleanMemory(): Boolean {
+        appendLog("Dropping VM caches & cleaning memory...")
+        executeCommand("echo 3 > /proc/sys/vm/drop_caches", true)
         return true
     }
 
@@ -139,7 +179,7 @@ class VmInstance(
     }
 
     @Synchronized
-    private fun appendLog(line: String) {
+    fun appendLog(line: String) {
         val current = _logFlow.value.toMutableList()
         current.add("[${System.currentTimeMillis()}] $line")
         if (current.size > 100) {

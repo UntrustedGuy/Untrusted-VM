@@ -10,29 +10,34 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import androidx.core.app.NotificationCompat
+import untrusted.vm.MainActivity
 import untrusted.vm.core.VmManager
 import untrusted.vm.ui.components.VmSurfaceView
 
 /**
- * Foreground floating window service (Picture-in-Picture / Overlay mode).
- * Equivalent to VMOS Pro's WindowService: overlays a miniature interactive VM
- * window on top of other Android apps with drag and resize support.
+ * Foreground floating window & floating ball service.
+ * Equivalent to VMOS Pro's WindowService & BallPopup.
+ * Supports:
+ * 1. Floating Ball mode: unobtrusive draggable icon with instant quick-action radial menu.
+ * 2. Floating Window mode: interactive Picture-in-Picture window overlay.
+ * 3. Seamless transition back to full-screen VM display.
  */
 class FloatingVmService : Service() {
 
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
+    private var floatingBallView: FloatingBallView? = null
     private var currentVmId: Int = 1
 
     companion object {
         const val ACTION_START_FLOATING = "untrusted.vm.action.START_FLOATING"
+        const val ACTION_START_BALL = "untrusted.vm.action.START_BALL"
         const val ACTION_STOP_FLOATING = "untrusted.vm.action.STOP_FLOATING"
         const val EXTRA_VM_ID = "extra_vm_id"
         private const val CHANNEL_ID = "untrusted_vm_floating_channel"
@@ -53,11 +58,16 @@ class FloatingVmService : Service() {
         when (intent.action) {
             ACTION_START_FLOATING -> {
                 currentVmId = intent.getIntExtra(EXTRA_VM_ID, 1)
-                startForeground(NOTIFICATION_ID, buildNotification())
+                startForeground(NOTIFICATION_ID, buildNotification("Floating Window active"))
                 showFloatingWindow(currentVmId)
             }
+            ACTION_START_BALL -> {
+                currentVmId = intent.getIntExtra(EXTRA_VM_ID, 1)
+                startForeground(NOTIFICATION_ID, buildNotification("Floating Ball active"))
+                showFloatingBall(currentVmId)
+            }
             ACTION_STOP_FLOATING -> {
-                removeFloatingWindow()
+                removeOverlays()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -65,8 +75,37 @@ class FloatingVmService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun showFloatingBall(vmId: Int) {
+        removeOverlays()
+        val instance = VmManager.getInstance(applicationContext).getVmInstance(vmId) ?: return
+
+        val ball = FloatingBallView(
+            context = this,
+            windowManager = windowManager!!,
+            instance = instance,
+            onExpandToWindow = { showFloatingWindow(vmId) },
+            onOpenFullscreen = {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra(EXTRA_VM_ID, vmId)
+                }
+                startActivity(intent)
+                removeOverlays()
+                stopSelf()
+            },
+            onShutdownVm = {
+                VmManager.getInstance(applicationContext).stopInstance(vmId)
+                removeOverlays()
+                stopSelf()
+            }
+        )
+
+        floatingBallView = ball
+        windowManager?.addView(ball, ball.layoutParamsWindow)
+    }
+
     private fun showFloatingWindow(vmId: Int) {
-        removeFloatingWindow()
+        removeOverlays()
 
         val instance = VmManager.getInstance(applicationContext).getVmInstance(vmId) ?: return
 
@@ -92,6 +131,18 @@ class FloatingVmService : Service() {
         val container = FrameLayout(this)
         val surfaceView = VmSurfaceView(this, instance)
         container.addView(surfaceView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+
+        // Minimize to Floating Ball button
+        val minimizeBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_crop)
+            setBackgroundColor(0x80000000.toInt())
+            setColorFilter(0xFF00E5FF.toInt())
+            layoutParams = FrameLayout.LayoutParams(80, 80, Gravity.TOP or Gravity.END)
+            setOnClickListener {
+                showFloatingBall(vmId)
+            }
+        }
+        container.addView(minimizeBtn)
 
         // Dragging & Moving handler
         var initialX = 0
@@ -122,15 +173,19 @@ class FloatingVmService : Service() {
         windowManager?.addView(container, params)
     }
 
-    private fun removeFloatingWindow() {
+    private fun removeOverlays() {
         if (floatingView != null) {
             windowManager?.removeView(floatingView)
             floatingView = null
         }
+        if (floatingBallView != null) {
+            windowManager?.removeView(floatingBallView)
+            floatingBallView = null
+        }
     }
 
     override fun onDestroy() {
-        removeFloatingWindow()
+        removeOverlays()
         super.onDestroy()
     }
 
@@ -138,7 +193,7 @@ class FloatingVmService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Untrusted VM Floating Window",
+                "Untrusted VM Floating Overlay",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
@@ -146,10 +201,10 @@ class FloatingVmService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(subtitle: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Untrusted VM Active")
-            .setContentText("Running VM in Floating Window mode")
+            .setContentText(subtitle)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .build()

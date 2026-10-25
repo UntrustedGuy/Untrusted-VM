@@ -1,6 +1,5 @@
 package untrusted.vm.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,16 +30,19 @@ fun VmSettingsScreen(
     onBackClick: () -> Unit,
     onOpenSuManagement: () -> Unit = {},
     onOpenDeviceSettings: () -> Unit = {},
-    onOpenFileTransfer: () -> Unit = {}
+    onOpenFileTransfer: () -> Unit = {},
+    onOpenDisplaySettings: () -> Unit = {},
+    onOpenLocationSettings: () -> Unit = {},
+    onOpenNetworkSettings: () -> Unit = {},
+    onOpenRomManager: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val config by instance.config.collectAsState()
     var isRootEnabled by remember(config.isRootEnabled) { mutableStateOf(config.isRootEnabled) }
-    var selectedResolution by remember { mutableStateOf("${config.resolutionWidth}x${config.resolutionHeight}") }
     val scrollState = rememberScrollState()
 
     val backupManager = remember { BackupRestoreManager(instance.filesystem) }
-    var backupStatus by remember { mutableStateOf("") }
+    var actionStatus by remember { mutableStateOf("") }
     var isBackingUp by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -65,14 +67,14 @@ fun VmSettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (backupStatus.isNotEmpty()) {
+            if (actionStatus.isNotEmpty()) {
                 Surface(
                     color = NeonGreen.copy(alpha = 0.15f),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        backupStatus,
+                        actionStatus,
                         color = NeonGreen,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
@@ -161,7 +163,7 @@ fun VmSettingsScreen(
                 }
             }
 
-            // Quick Tools: Hardware Spoofing & File Transfer
+            // VM Tools & Subsystems
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,10 +172,20 @@ fun VmSettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "VM Tools & Features",
+                        text = "VMOS Pro Features & Tools",
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary
                     )
+
+                    OutlinedButton(
+                        onClick = onOpenDisplaySettings,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan)
+                    ) {
+                        Icon(Icons.Default.AspectRatio, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Display Resolution & Refresh Rate (${config.resolutionWidth}x${config.resolutionHeight})")
+                    }
 
                     OutlinedButton(
                         onClick = onOpenDeviceSettings,
@@ -186,6 +198,26 @@ fun VmSettingsScreen(
                     }
 
                     OutlinedButton(
+                        onClick = onOpenLocationSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonAmber)
+                    ) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("GPS Location Penetrator & Step Counter")
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenNetworkSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonPurple)
+                    ) {
+                        Icon(Icons.Default.SettingsEthernet, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Network, Virtual ADB & Proxy Settings")
+                    }
+
+                    OutlinedButton(
                         onClick = onOpenFileTransfer,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonPurple)
@@ -194,73 +226,45 @@ fun VmSettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("File Transfer Station & Host App Importer")
                     }
-                }
-            }
 
-            // Display & Resolution
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, DarkCardBorder, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Display Resolution",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
+                    OutlinedButton(
+                        onClick = onOpenRomManager,
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonGreen)
                     ) {
-                        val resolutions = listOf("720x1280", "1080x1920", "1440x2560")
-                        for (res in resolutions) {
-                            val isSelected = selectedResolution == res
-                            OutlinedButton(
-                                onClick = {
-                                    selectedResolution = res
-                                    val parts = res.split("x")
-                                    if (parts.size == 2) {
-                                        val w = parts[0].toIntOrNull() ?: 720
-                                        val h = parts[1].toIntOrNull() ?: 1280
-                                        instance.updateConfig(config.withResolution(w, h))
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isSelected) NeonCyan.copy(alpha = 0.15f) else DarkSurfaceVariant,
-                                    contentColor = if (isSelected) NeonCyan else TextSecondary
-                                )
-                            ) {
-                                Text(res, fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
+                        Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("ROM Store & Custom OS Image Manager")
                     }
                 }
             }
 
-            // Backup & Maintenance
+            // Instance Clone & Snapshot Management
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.dp, DarkCardBorder, RoundedCornerShape(16.dp)),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Instance Storage & Backup",
+                        text = "Instance Management & Clone",
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Storage Path: /instances/vm_${instance.id}/",
-                        color = TextSecondary,
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            val cloned = vmManager.cloneInstance(instance.id)
+                            actionStatus = if (cloned != null) "Successfully cloned to ${cloned.config.value.name}!" else "Clone failed"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Clone This Virtual Machine")
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -275,7 +279,7 @@ fun VmSettingsScreen(
                                 Thread {
                                     val ok = backupManager.createBackup(backupFile)
                                     isBackingUp = false
-                                    backupStatus = if (ok) "Snapshot backup saved: ${backupFile.name}" else "Backup failed"
+                                    actionStatus = if (ok) "Snapshot backup saved: ${backupFile.name}" else "Backup failed"
                                 }.start()
                             },
                             enabled = !isBackingUp,
@@ -288,7 +292,10 @@ fun VmSettingsScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { instance.filesystem.wipeData() },
+                            onClick = {
+                                instance.filesystem.wipeData()
+                                actionStatus = "Guest data (/data and /cache) wiped clean"
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonAmber)
                         ) {
@@ -296,7 +303,7 @@ fun VmSettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     Button(
                         onClick = {

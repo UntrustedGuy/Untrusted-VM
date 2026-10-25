@@ -69,7 +69,7 @@ fun CreateVmDialog(
 
                 // Android ROM Version Selector
                 Text(
-                    text = "Guest Android OS Version",
+                    text = "Guest Android OS Version & Edition",
                     color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
@@ -77,14 +77,20 @@ fun CreateVmDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val versions = listOf("7.1.2", "9.0", "12.0")
-                    for (ver in versions) {
+                    val versions = listOf(
+                        Pair("7.1 Geek", "7.1.2"),
+                        Pair("9.0 Pure", "9.0.0"),
+                        Pair("10.0 Pro", "10.0.0"),
+                        Pair("12.0 GMS", "12.0.0")
+                    )
+                    for ((label, ver) in versions) {
                         val isSelected = selectedVersion == ver
                         OutlinedButton(
                             onClick = { selectedVersion = ver },
                             modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = if (isSelected) NeonCyan.copy(alpha = 0.15f) else DarkSurfaceVariant,
                                 contentColor = if (isSelected) NeonCyan else TextSecondary
@@ -94,7 +100,7 @@ fun CreateVmDialog(
                                 if (isSelected) NeonCyan else DarkCardBorder
                             )
                         ) {
-                            Text("Android $ver", fontSize = 12.sp, maxLines = 1)
+                            Text(label, fontSize = 11.sp, maxLines = 1)
                         }
                     }
                 }

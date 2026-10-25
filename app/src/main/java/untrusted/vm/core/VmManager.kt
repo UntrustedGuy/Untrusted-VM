@@ -12,15 +12,19 @@ import untrusted.vm.IVmCallback
 import untrusted.vm.IVmService
 import untrusted.vm.service.VmProcessSlot
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
  * Central orchestrator managing multiple Untrusted VM instances.
- * Provides per-instance root toggle, lifecycle control, and service binding.
+ * Provides per-instance root toggle, lifecycle control, service binding, cloning, and ROM provisioning.
  */
-class VmManager private constructor(private val appContext: Context) {
+class VmManager private constructor(val appContext: Context) {
 
     private val baseStorageDir: File = appContext.filesDir
     private val instancesDir: File = File(baseStorageDir, "instances")
+
+    val romManager = RomManager(appContext)
 
     private val _instances = MutableStateFlow<List<VmInstance>>(emptyList())
     val instances: StateFlow<List<VmInstance>> = _instances.asStateFlow()
@@ -49,7 +53,7 @@ class VmManager private constructor(private val appContext: Context) {
                     try {
                         val json = configFile.readText(Charsets.UTF_8)
                         val config = VmConfig.fromJson(json)
-                        loaded.add(VmInstance(config, baseStorageDir))
+                        loaded.add(VmInstance(config, baseStorageDir, appContext))
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
@@ -69,7 +73,7 @@ class VmManager private constructor(private val appContext: Context) {
                 dpi = 320,
                 allocatedRamMb = 2048
             )
-            val defaultInstance = VmInstance(defaultConfig, baseStorageDir)
+            val defaultInstance = VmInstance(defaultConfig, baseStorageDir, appContext)
             saveInstanceConfig(defaultInstance)
             loaded.add(defaultInstance)
         }
@@ -80,6 +84,10 @@ class VmManager private constructor(private val appContext: Context) {
 
     fun selectInstance(id: Int) {
         _selectedInstance.value = _instances.value.firstOrNull { it.id == id }
+    }
+
+    fun getVmInstance(id: Int): VmInstance? {
+        return _instances.value.firstOrNull { it.id == id }
     }
 
     /**
@@ -106,7 +114,7 @@ class VmManager private constructor(private val appContext: Context) {
             dpi = dpi,
             allocatedRamMb = ramMb
         )
-        val instance = VmInstance(config, baseStorageDir)
+        val instance = VmInstance(config, baseStorageDir, appContext)
         saveInstanceConfig(instance)
 
         val updated = _instances.value.toMutableList()
@@ -117,6 +125,42 @@ class VmManager private constructor(private val appContext: Context) {
             _selectedInstance.value = instance
         }
         return instance
+    }
+
+    /**
+     * Clones an existing VM instance (full duplication of config, disk, and apps).
+     */
+    @Synchronized
+    fun cloneInstance(sourceId: Int, newName: String? = null): VmInstance? {
+        val sourceInstance = getVmInstance(sourceId) ?: return null
+        val nextId = (_instances.value.maxOfOrNull { it.id } ?: 0) + 1
+        val srcDir = sourceInstance.filesystem.rootDir
+        val dstDir = File(instancesDir, "vm_$nextId")
+
+        // 1. Copy directory recursively
+        copyDirectory(srcDir, dstDir)
+
+        // 2. Load and adapt config for new ID
+        val srcConfig = sourceInstance.config.value
+        val clonedConfig = VmConfig(
+            id = nextId,
+            name = newName ?: "${srcConfig.name} (Clone)",
+            androidVersion = srcConfig.androidVersion,
+            isRootEnabled = srcConfig.isRootEnabled,
+            resolutionWidth = srcConfig.resolutionWidth,
+            resolutionHeight = srcConfig.resolutionHeight,
+            dpi = srcConfig.dpi,
+            allocatedRamMb = srcConfig.allocatedRamMb
+        )
+
+        val newInstance = VmInstance(clonedConfig, baseStorageDir, appContext)
+        saveInstanceConfig(newInstance)
+
+        val updated = _instances.value.toMutableList()
+        updated.add(newInstance)
+        _instances.value = updated.sortedBy { it.id }
+
+        return newInstance
     }
 
     /**
@@ -188,9 +232,15 @@ class VmManager private constructor(private val appContext: Context) {
                 serviceBinders[id] = binder
                 try {
                     binder.registerCallback(object : IVmCallback.Stub() {
-                        override fun onStateChanged(state: Int, message: String?) {}
-                        override fun onLogOutput(line: String?) {}
-                        override fun onRootStatusChanged(isRootEnabled: Boolean) {}
+                        override fun onStateChanged(state: Int, message: String?) {
+                            instance.appendLog("Service state: $state - $message")
+                        }
+                        override fun onLogOutput(line: String?) {
+                            if (line != null) instance.appendLog(line)
+                        }
+                        override fun onRootStatusChanged(isRootEnabled: Boolean) {
+                            instance.appendLog("Remote root status: $isRootEnabled")
+                        }
                     })
                     binder.startVm(instance.config.value.toJson())
                 } catch (e: Exception) {
@@ -203,12 +253,8 @@ class VmManager private constructor(private val appContext: Context) {
             }
         }
 
-        try {
-            appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-            serviceConnections[id] = connection
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        serviceConnections[id] = connection
+        appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
 
     private fun unbindProcessSlot(id: Int) {
@@ -219,9 +265,9 @@ class VmManager private constructor(private val appContext: Context) {
                 e.printStackTrace()
             }
         }
-        serviceConnections.remove(id)?.let { connection ->
+        serviceConnections.remove(id)?.let { conn ->
             try {
-                appContext.unbindService(connection)
+                appContext.unbindService(conn)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -235,6 +281,23 @@ class VmManager private constructor(private val appContext: Context) {
             configFile.writeText(instance.config.value.toJson(), Charsets.UTF_8)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun copyDirectory(source: File, destination: File) {
+        if (!source.exists()) return
+        if (source.isDirectory) {
+            destination.mkdirs()
+            source.listFiles()?.forEach { file ->
+                copyDirectory(file, File(destination, file.name))
+            }
+        } else {
+            destination.parentFile?.mkdirs()
+            FileInputStream(source).use { inStream ->
+                FileOutputStream(destination).use { outStream ->
+                    inStream.copyTo(outStream)
+                }
+            }
         }
     }
 

@@ -13,6 +13,7 @@ add_library(vmcore SHARED
     vm_framebuffer.cpp
     vm_input.cpp
     vm_hal.cpp
+    vm_su_daemon.cpp
 )
 
 find_library(log-lib log)

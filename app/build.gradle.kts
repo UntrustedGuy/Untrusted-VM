@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "untrusted.vm"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "untrusted.vm"
@@ -53,6 +54,10 @@ android {
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     packaging {
