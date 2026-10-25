@@ -75,6 +75,15 @@ public class VmConfig {
         );
     }
 
+    public VmConfig withResolution(int width, int height) {
+        return new VmConfig(
+            id, name, androidVersion, isRootEnabled,
+            width, height, dpi,
+            allocatedRamMb, cpuCores, enableGoogleServices,
+            autoStart, createdAt
+        );
+    }
+
     public String toJson() {
         try {
             JSONObject obj = new JSONObject();

@@ -1,12 +1,18 @@
+#define _GNU_SOURCE
 #include <sys/types.h>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <cerrno>
 #include <cstring>
+#include <cstdlib>
 #include <android/log.h>
 
 #define LOG_TAG "UntrustedVM-Preload"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+
+#ifndef RTLD_NEXT
+#define RTLD_NEXT ((void *) -1l)
+#endif
 
 // Function pointer types for real libc implementations
 typedef uid_t (*real_getuid_t)();

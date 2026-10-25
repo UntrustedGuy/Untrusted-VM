@@ -9,10 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import untrusted.vm.core.VmInstance
 import untrusted.vm.core.VmManager
-import untrusted.vm.ui.screens.DashboardScreen
-import untrusted.vm.ui.screens.TerminalScreen
-import untrusted.vm.ui.screens.VmDisplayScreen
-import untrusted.vm.ui.screens.VmSettingsScreen
+import untrusted.vm.ui.screens.*
 import untrusted.vm.ui.theme.DarkBackground
 import untrusted.vm.ui.theme.UntrustedVmTheme
 
@@ -20,7 +17,10 @@ enum class Screen {
     DASHBOARD,
     DISPLAY,
     SETTINGS,
-    TERMINAL
+    TERMINAL,
+    SU_MANAGEMENT,
+    DEVICE_SETTINGS,
+    FILE_TRANSFER
 }
 
 class MainActivity : ComponentActivity() {
@@ -73,7 +73,10 @@ class MainActivity : ComponentActivity() {
                                 VmSettingsScreen(
                                     instance = activeInstance,
                                     vmManager = vmManager,
-                                    onBackClick = { currentScreen = Screen.DASHBOARD }
+                                    onBackClick = { currentScreen = Screen.DASHBOARD },
+                                    onOpenSuManagement = { currentScreen = Screen.SU_MANAGEMENT },
+                                    onOpenDeviceSettings = { currentScreen = Screen.DEVICE_SETTINGS },
+                                    onOpenFileTransfer = { currentScreen = Screen.FILE_TRANSFER }
                                 )
                             } else {
                                 currentScreen = Screen.DASHBOARD
@@ -84,6 +87,36 @@ class MainActivity : ComponentActivity() {
                                 TerminalScreen(
                                     instance = activeInstance,
                                     onBackClick = { currentScreen = Screen.DISPLAY }
+                                )
+                            } else {
+                                currentScreen = Screen.DASHBOARD
+                            }
+                        }
+                        Screen.SU_MANAGEMENT -> {
+                            if (activeInstance != null) {
+                                SuManagementScreen(
+                                    instance = activeInstance,
+                                    onBack = { currentScreen = Screen.SETTINGS }
+                                )
+                            } else {
+                                currentScreen = Screen.DASHBOARD
+                            }
+                        }
+                        Screen.DEVICE_SETTINGS -> {
+                            if (activeInstance != null) {
+                                DeviceSettingsScreen(
+                                    instance = activeInstance,
+                                    onBack = { currentScreen = Screen.SETTINGS }
+                                )
+                            } else {
+                                currentScreen = Screen.DASHBOARD
+                            }
+                        }
+                        Screen.FILE_TRANSFER -> {
+                            if (activeInstance != null) {
+                                FileTransferScreen(
+                                    instance = activeInstance,
+                                    onBack = { currentScreen = Screen.SETTINGS }
                                 )
                             } else {
                                 currentScreen = Screen.DASHBOARD
