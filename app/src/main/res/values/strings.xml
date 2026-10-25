@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Untrusted VM</string>
+    <string name="vm_dashboard_title">Untrusted VM Dashboard</string>
+    <string name="vm_create_new">New VM Instance</string>
+    <string name="vm_status_running">Running</string>
+    <string name="vm_status_stopped">Stopped</string>
+    <string name="vm_status_starting">Starting...</string>
+    <string name="vm_status_stopping">Stopping...</string>
+    <string name="vm_status_error">Error</string>
+    <string name="vm_root_title">Simulated Root Access</string>
+    <string name="vm_root_summary">Allow guest applications inside this VM to acquire root (su) privileges without host root or Shizuku.</string>
+    <string name="vm_root_enabled">ROOT ENABLED</string>
+    <string name="vm_root_disabled">ROOT DISABLED</string>
+</resources>

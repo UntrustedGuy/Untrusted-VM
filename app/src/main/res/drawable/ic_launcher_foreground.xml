@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Hex Container (Cyberpunk Neon Cyan) -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M54,20 L84,36 L84,72 L54,88 L24,72 L24,36 Z" />
+
+    <!-- Inner Shield (Electric Purple) -->
+    <path
+        android:fillColor="#1F1338"
+        android:strokeColor="#B388FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M54,30 L74,40 V62 C74,72 54,78 54,78 C54,78 34,72 34,62 V40 Z" />
+
+    <!-- Terminal Prompt / Virtual Root Symbol '>_' in Cyan -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M44,48 L52,54 L44,60" />
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M56,58 H64 V61 H56 Z" />
+
+    <!-- Top circuit accent -->
+    <path
+        android:strokeColor="#7C4DFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M38,28 L46,24 H62 L70,28" />
+</vector>

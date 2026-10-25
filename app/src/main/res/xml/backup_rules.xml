@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <!-- Exclude large VM rootfs from cloud backup -->
+    <exclude domain="file" path="instances" />
+</full-backup-content>
