@@ -12,8 +12,9 @@ enum class VmProcessSlot(val processName: String, val serviceClass: Class<*>) {
 
     companion object {
         fun forInstanceId(instanceId: Int): VmProcessSlot {
-            val idx = (instanceId - 1) % entries.size
-            return entries[if (idx < 0) 0 else idx]
+            val validId = if (instanceId < 1) 1 else instanceId
+            val idx = (validId - 1) % entries.size
+            return entries[idx]
         }
     }
 }

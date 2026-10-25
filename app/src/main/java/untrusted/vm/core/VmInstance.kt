@@ -17,6 +17,7 @@ class VmInstance(
     val filesystem = VmFilesystem(id, File(baseStorageDir, "instances/vm_$id"))
     val rootController = RootController(id, filesystem.rootDir)
     val suPolicyManager = SuPolicyManager(id)
+    val engine = VmEngine(initialConfig)
 
     private val _config = MutableStateFlow(initialConfig)
     val config: StateFlow<VmConfig> = _config.asStateFlow()
@@ -31,6 +32,7 @@ class VmInstance(
         filesystem.initializeSkeleton()
         // Synchronize initial root state with config
         rootController.setRootState(initialConfig.isRootEnabled)
+        engine.syncNativeRootOption()
         appendLog("Instance #$id initialized. Root: ${if (initialConfig.isRootEnabled) "ENABLED" else "DISABLED"}")
     }
 
@@ -44,6 +46,8 @@ class VmInstance(
         if (success) {
             val updatedConfig = _config.value.withRootEnabled(enabled)
             _config.value = updatedConfig
+            engine.updateConfig(updatedConfig)
+            engine.syncNativeRootOption()
             saveConfig()
             appendLog("Root status changed to: ${if (enabled) "ENABLED (su active)" else "DISABLED (su masked)"}")
         } else {
@@ -66,6 +70,7 @@ class VmInstance(
         // Verify rootfs and sync root state
         filesystem.initializeSkeleton()
         rootController.setRootState(_config.value.isRootEnabled)
+        engine.syncNativeRootOption()
 
         appendLog("Guest filesystem mounted: ${filesystem.rootfsDir.absolutePath}")
         appendLog("Simulated root: ${if (_config.value.isRootEnabled) "ACTIVE (/system/xbin/su ready)" else "DISABLED"}")
@@ -93,16 +98,18 @@ class VmInstance(
      * Executes a command inside this instance's environment.
      */
     fun executeCommand(command: String, asRoot: Boolean): String {
-        val effectiveRoot = asRoot && _config.value.isRootEnabled
-        appendLog("CMD [${if (effectiveRoot) "root" else "user"}]: $command")
-        val result = rootController.executeGuestCommand(command, effectiveRoot)
-        appendLog("OUT: $result")
-        return result
+        appendLog("CMD [${if (asRoot) "root" else "user"}]: $command")
+        val result = engine.executeShell(command, asRoot)
+        appendLog("OUT: ${result.output}")
+        return result.output
     }
 
+    @Synchronized
     fun updateConfig(newConfig: VmConfig) {
         val oldRoot = _config.value.isRootEnabled
         _config.value = newConfig
+        engine.updateConfig(newConfig)
+        engine.syncNativeRootOption()
         saveConfig()
         if (oldRoot != newConfig.isRootEnabled) {
             rootController.setRootState(newConfig.isRootEnabled)

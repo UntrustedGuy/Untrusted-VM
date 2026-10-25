@@ -50,7 +50,7 @@ public class RootController {
      */
     public boolean isRootActive() {
         File su = getSuBinary();
-        return su.exists() && su.canExecute();
+        return su.exists() && (su.length() > 0 || su.canExecute());
     }
 
     /**
@@ -167,10 +167,10 @@ public class RootController {
     public String executeGuestCommand(String command, boolean asRoot) {
         if (asRoot && !isRootActive()) {
             return "Error: Root is disabled for VM instance " + vmId + ". Please enable Root in VM Settings.";
-        } else if (asRoot) {
-            return "root@untrusted-vm# " + command + "\n[exit 0: uid=0(root) gid=0(root) groups=0(root)]";
-        } else {
-            return "u0_a100@untrusted-vm$ " + command + "\n[exit 0: uid=10100(u0_a100) gid=10100(u0_a100)]";
         }
+        VmConfig tempConfig = new VmConfig(vmId, "Untrusted VM " + vmId, "7.1.2", isRootActive(), 720, 1280, 320, 2048, 4, false, false, 0);
+        VmEngine engine = new VmEngine(tempConfig);
+        VmEngine.ExecutionResult res = engine.executeShell(command, asRoot);
+        return res.getOutput();
     }
 }

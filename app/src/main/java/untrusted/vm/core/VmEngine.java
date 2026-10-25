@@ -19,10 +19,53 @@ public class VmEngine {
         public String getOutput() { return output; }
     }
 
-    private final VmConfig config;
+    private volatile VmConfig config;
+    private static boolean nativeLoaded = false;
+
+    static {
+        try {
+            System.loadLibrary("vmcore");
+            nativeLoaded = true;
+        } catch (Throwable t) {
+            nativeLoaded = false;
+        }
+    }
+
+    public static boolean isNativeLoaded() {
+        return nativeLoaded;
+    }
+
+    public static native int nativeInitSandbox(int vmId, String rootfsPath, boolean rootEnabled);
+    public static native boolean nativeSetRootOption(int vmId, boolean enabled);
 
     public VmEngine(VmConfig config) {
         this.config = config;
+    }
+
+    public void updateConfig(VmConfig newConfig) {
+        this.config = newConfig;
+    }
+
+    public VmConfig getConfig() {
+        return config;
+    }
+
+    public int initNativeSandbox(String rootfsPath) {
+        if (!nativeLoaded) return 0;
+        try {
+            return nativeInitSandbox(config.getId(), rootfsPath, config.isRootEnabled());
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
+    public boolean syncNativeRootOption() {
+        if (!nativeLoaded) return true;
+        try {
+            return nativeSetRootOption(config.getId(), config.isRootEnabled());
+        } catch (UnsatisfiedLinkError e) {
+            return true;
+        }
     }
 
     public ExecutionResult executeShell(String command, boolean requestRoot) {
@@ -43,15 +86,34 @@ public class VmEngine {
             if (isRoot) {
                 return new ExecutionResult(0, "uid=0(root) gid=0(root) groups=0(root),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats) context=u:r:su:s0");
             } else {
-                return new ExecutionResult(0, "uid=10150(u0_a150) gid=10150(u0_a150) groups=10150(u0_a150),3003(inet),9997(everybody) context=u:r:untrusted_app:s0:c150,c256,c512,c768");
+                return new ExecutionResult(0, "uid=10100(u0_a100) gid=10100(u0_a100) groups=10100(u0_a100),3003(inet),9997(everybody) context=u:r:untrusted_app:s0:c150,c256,c512,c768");
             }
         }
 
-        if (trimmed.startsWith("which su")) {
+        if (trimmed.equals("whoami")) {
+            return new ExecutionResult(0, isRoot ? "root" : "u0_a100");
+        }
+
+        if (trimmed.equals("which su") || trimmed.equals("command -v su")) {
             if (config.isRootEnabled()) {
                 return new ExecutionResult(0, "/system/xbin/su");
             } else {
                 return new ExecutionResult(1, "");
+            }
+        } else if (trimmed.startsWith("which ") || trimmed.startsWith("command -v ")) {
+            String binaryName = trimmed.substring(trimmed.indexOf(' ') + 1).trim();
+            if (binaryName.equals("su")) {
+                if (config.isRootEnabled()) {
+                    return new ExecutionResult(0, "/system/xbin/su");
+                } else {
+                    return new ExecutionResult(1, "");
+                }
+            } else if (binaryName.equals("sh")) {
+                return new ExecutionResult(0, "/system/bin/sh");
+            } else if (binaryName.equals("getprop")) {
+                return new ExecutionResult(0, "/system/bin/getprop");
+            } else {
+                return new ExecutionResult(1, binaryName + " not found");
             }
         }
 
@@ -63,11 +125,11 @@ public class VmEngine {
             }
         }
 
-        if (trimmed.startsWith("su")) {
+        if (trimmed.equals("su") || trimmed.startsWith("su ") || trimmed.startsWith("su\t")) {
             if (config.isRootEnabled()) {
-                String sub = trimmed.substring(2).trim();
-                if (sub.startsWith("-c ")) {
-                    String realCmd = sub.substring(3).trim();
+                String sub = trimmed.length() > 2 ? trimmed.substring(2).trim() : "";
+                if (sub.startsWith("-c ") || sub.startsWith("-c\t")) {
+                    String realCmd = sub.substring(2).trim();
                     if ((realCmd.startsWith("\"") && realCmd.endsWith("\"")) ||
                         (realCmd.startsWith("'") && realCmd.endsWith("'"))) {
                         realCmd = realCmd.substring(1, realCmd.length() - 1);
@@ -83,8 +145,8 @@ public class VmEngine {
             }
         }
 
-        if (trimmed.startsWith("getprop")) {
-            String propName = trimmed.substring(7).trim();
+        if (trimmed.equals("getprop") || trimmed.startsWith("getprop ") || trimmed.startsWith("getprop\t")) {
+            String propName = trimmed.length() > 7 ? trimmed.substring(7).trim() : "";
             if (propName.isEmpty()) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("[ro.build.version.release]: [").append(config.getAndroidVersion()).append("]\n");
@@ -125,7 +187,7 @@ public class VmEngine {
             }
         }
 
-        String prefix = isRoot ? "root@untrusted-vm:/#" : "u0_a150@untrusted-vm:/$";
+        String prefix = isRoot ? "root@untrusted-vm:/#" : "u0_a100@untrusted-vm:/$";
         return new ExecutionResult(0, prefix + " " + trimmed + "\n[Command executed successfully]");
     }
 }

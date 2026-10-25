@@ -26,13 +26,13 @@ class VmEngineTest {
 
     @Test
     fun testRootEnabledIdReportsUidZero() {
-        val config = VmConfig(id = 1, name = "Rooted VM", isRootEnabled = true)
+        val config = VmConfig(1, "Rooted VM", "7.1.2", true, 720, 1280, 320, 2048, 4, false, false, 1000L)
         val instance = VmInstance(config, tempDir)
-        val engine = VmEngine(instance)
+        val engine = instance.engine
 
         val result = engine.executeShell("id", requestRoot = false)
         assertEquals(0, result.exitCode)
-        assertTrue(result.output.contains("uid=10150(u0_a150)"))
+        assertTrue(result.output.contains("uid=10100(u0_a100)"))
 
         val rootResult = engine.executeShell("id", requestRoot = true)
         assertEquals(0, rootResult.exitCode)
@@ -42,9 +42,9 @@ class VmEngineTest {
 
     @Test
     fun testRootDisabledIdBlocksRoot() {
-        val config = VmConfig(id = 2, name = "Unrooted VM", isRootEnabled = false)
+        val config = VmConfig(2, "Unrooted VM", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L)
         val instance = VmInstance(config, tempDir)
-        val engine = VmEngine(instance)
+        val engine = instance.engine
 
         val denied = engine.executeShell("id", requestRoot = true)
         assertNotEquals(0, denied.exitCode)
@@ -53,14 +53,14 @@ class VmEngineTest {
 
     @Test
     fun testWhichSuBehavior() {
-        val rootedInstance = VmInstance(VmConfig(id = 1, name = "Rooted", isRootEnabled = true), tempDir)
-        val rootedEngine = VmEngine(rootedInstance)
+        val rootedInstance = VmInstance(VmConfig(1, "Rooted", "7.1.2", true, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val rootedEngine = rootedInstance.engine
         val rootedWhich = rootedEngine.executeShell("which su", requestRoot = false)
         assertEquals(0, rootedWhich.exitCode)
         assertEquals("/system/xbin/su", rootedWhich.output)
 
-        val unrootedInstance = VmInstance(VmConfig(id = 2, name = "Unrooted", isRootEnabled = false), tempDir)
-        val unrootedEngine = VmEngine(unrootedInstance)
+        val unrootedInstance = VmInstance(VmConfig(2, "Unrooted", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val unrootedEngine = unrootedInstance.engine
         val unrootedWhich = unrootedEngine.executeShell("which su", requestRoot = false)
         assertNotEquals(0, unrootedWhich.exitCode)
         assertTrue(unrootedWhich.output.isEmpty())
@@ -68,30 +68,30 @@ class VmEngineTest {
 
     @Test
     fun testSuVersionBehavior() {
-        val rootedInstance = VmInstance(VmConfig(id = 1, name = "Rooted", isRootEnabled = true), tempDir)
-        val rootedEngine = VmEngine(rootedInstance)
+        val rootedInstance = VmInstance(VmConfig(1, "Rooted", "7.1.2", true, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val rootedEngine = rootedInstance.engine
         val suVer = rootedEngine.executeShell("su -v", requestRoot = false)
         assertEquals(0, suVer.exitCode)
         assertTrue(suVer.output.contains("UntrustedVM-su"))
 
-        val unrootedInstance = VmInstance(VmConfig(id = 2, name = "Unrooted", isRootEnabled = false), tempDir)
-        val unrootedEngine = VmEngine(unrootedInstance)
+        val unrootedInstance = VmInstance(VmConfig(2, "Unrooted", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val unrootedEngine = unrootedInstance.engine
         val unrootedSuVer = unrootedEngine.executeShell("su -v", requestRoot = false)
         assertEquals(127, unrootedSuVer.exitCode)
     }
 
     @Test
     fun testGetpropReflectsRootState() {
-        val rootedInstance = VmInstance(VmConfig(id = 1, name = "Rooted", isRootEnabled = true), tempDir)
-        val rootedEngine = VmEngine(rootedInstance)
+        val rootedInstance = VmInstance(VmConfig(1, "Rooted", "7.1.2", true, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val rootedEngine = rootedInstance.engine
         val tags = rootedEngine.executeShell("getprop ro.build.tags", requestRoot = false)
         assertEquals("test-keys", tags.output)
 
         val debuggable = rootedEngine.executeShell("getprop ro.debuggable", requestRoot = false)
         assertEquals("1", debuggable.output)
 
-        val unrootedInstance = VmInstance(VmConfig(id = 2, name = "Unrooted", isRootEnabled = false), tempDir)
-        val unrootedEngine = VmEngine(unrootedInstance)
+        val unrootedInstance = VmInstance(VmConfig(2, "Unrooted", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val unrootedEngine = unrootedInstance.engine
         val unrootedTags = unrootedEngine.executeShell("getprop ro.build.tags", requestRoot = false)
         assertEquals("release-keys", unrootedTags.output)
 
@@ -100,11 +100,21 @@ class VmEngineTest {
     }
 
     @Test
-    fun testEmptyAndWhitespaceCommands() {
-        val instance = VmInstance(VmConfig(id = 1, name = "Test", isRootEnabled = true), tempDir)
-        val engine = VmEngine(instance)
-        val res = engine.executeShell("   ", requestRoot = false)
-        assertEquals(0, res.exitCode)
-        assertEquals("", res.output)
+    fun testCommandWordBoundariesAndEdgeCases() {
+        val unrootedInstance = VmInstance(VmConfig(2, "Unrooted", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L), tempDir)
+        val engine = unrootedInstance.engine
+
+        // Non-su commands starting with "su"
+        val surfaceRes = engine.executeShell("surfaceflinger", requestRoot = false)
+        assertEquals(0, surfaceRes.exitCode)
+        assertFalse(surfaceRes.output.contains("su: inaccessible"))
+
+        val whichSurface = engine.executeShell("which surface", requestRoot = false)
+        assertEquals(1, whichSurface.exitCode)
+        assertNotEquals("/system/xbin/su", whichSurface.output)
+
+        val emptyRes = engine.executeShell("   ", requestRoot = false)
+        assertEquals(0, emptyRes.exitCode)
+        assertEquals("", emptyRes.output)
     }
 }

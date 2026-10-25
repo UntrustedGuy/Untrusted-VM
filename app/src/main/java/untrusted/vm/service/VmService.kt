@@ -28,6 +28,7 @@ abstract class BaseVmService : Service() {
     private var vmConfig: VmConfig? = null
     private var vmFilesystem: VmFilesystem? = null
     private var rootController: RootController? = null
+    private var vmEngine: untrusted.vm.core.VmEngine? = null
     private var currentState: VmState = VmState.STOPPED
 
     private val callbacks = RemoteCallbackList<IVmCallback>()
@@ -49,6 +50,10 @@ abstract class BaseVmService : Service() {
                 val rc = RootController(config.id, fs.rootDir)
                 rc.setRootState(config.isRootEnabled)
                 this@BaseVmService.rootController = rc
+
+                val engine = untrusted.vm.core.VmEngine(config)
+                engine.syncNativeRootOption()
+                this@BaseVmService.vmEngine = engine
 
                 updateState(VmState.RUNNING, "VM #${config.id} container started")
                 broadcastLog("Container initialized on ${processSlot.processName}")
@@ -75,7 +80,12 @@ abstract class BaseVmService : Service() {
             val rc = rootController ?: return false
             val success = rc.setRootState(enabled)
             if (success) {
-                vmConfig = vmConfig?.withRootEnabled(enabled)
+                val updatedConfig = vmConfig?.withRootEnabled(enabled)
+                vmConfig = updatedConfig
+                if (updatedConfig != null) {
+                    vmEngine?.updateConfig(updatedConfig)
+                }
+                vmEngine?.syncNativeRootOption()
                 broadcastRootChanged(enabled)
                 broadcastLog("Simulated root set to $enabled")
             }
@@ -83,6 +93,10 @@ abstract class BaseVmService : Service() {
         }
 
         override fun executeShellCommand(command: String, runAsRoot: Boolean): String {
+            val eng = vmEngine
+            if (eng != null) {
+                return eng.executeShell(command, runAsRoot).output
+            }
             val rc = rootController
             return rc?.executeGuestCommand(command, runAsRoot)
                 ?: "Error: VM not initialized"

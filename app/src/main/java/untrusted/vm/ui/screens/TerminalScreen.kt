@@ -35,7 +35,6 @@ fun TerminalScreen(
     onBackClick: () -> Unit
 ) {
     val config by instance.config.collectAsState()
-    val engine = remember(instance) { VmEngine(instance) }
     var inputCommand by remember { mutableStateOf("") }
     val consoleLines = remember {
         mutableStateListOf(
@@ -52,10 +51,10 @@ fun TerminalScreen(
 
     fun runCmd(cmd: String, asRoot: Boolean = false) {
         if (cmd.isBlank()) return
-        val prefix = if (asRoot || config.isRootEnabled) "root@vm# " else "u0_a150@vm$ "
+        val prefix = if (asRoot || config.isRootEnabled) "root@vm# " else "u0_a100@vm$ "
         consoleLines.add(prefix + cmd)
-        val result = engine.executeShell(cmd, requestRoot = asRoot)
-        for (line in result.output.lines()) {
+        val output = instance.executeCommand(cmd, asRoot = asRoot)
+        for (line in output.lines()) {
             consoleLines.add(line)
         }
         coroutineScope.launch {

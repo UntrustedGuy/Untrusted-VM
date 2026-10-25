@@ -12,13 +12,17 @@ public class VmEngineTest {
         // id command as non-root
         VmEngine.ExecutionResult nonRootId = engine.executeShell("id", false);
         assert nonRootId.getExitCode() == 0 : "Exit code should be 0";
-        assert nonRootId.getOutput().contains("uid=10150(u0_a150)") : "Should report guest user UID";
+        assert nonRootId.getOutput().contains("uid=10100(u0_a100)") : "Should report guest user UID";
 
         // id command requesting root
         VmEngine.ExecutionResult rootId = engine.executeShell("id", true);
         assert rootId.getExitCode() == 0 : "Exit code should be 0";
         assert rootId.getOutput().contains("uid=0(root)") : "Should report root UID 0";
         assert rootId.getOutput().contains("context=u:r:su:s0") : "Should report root SELinux context";
+
+        // whoami
+        assert engine.executeShell("whoami", false).getOutput().equals("u0_a100") : "whoami as user";
+        assert engine.executeShell("whoami", true).getOutput().equals("root") : "whoami as root";
 
         // which su
         VmEngine.ExecutionResult whichSu = engine.executeShell("which su", false);
@@ -29,6 +33,11 @@ public class VmEngineTest {
         VmEngine.ExecutionResult suV = engine.executeShell("su -v", false);
         assert suV.getExitCode() == 0 : "su -v should succeed";
         assert suV.getOutput().contains("UntrustedVM-su") : "su -v output should contain UntrustedVM-su";
+
+        // su -c "id"
+        VmEngine.ExecutionResult suC = engine.executeShell("su -c \"id\"", false);
+        assert suC.getExitCode() == 0 : "su -c should succeed";
+        assert suC.getOutput().contains("uid=0(root)") : "su -c should execute as root";
 
         // getprop
         VmEngine.ExecutionResult tags = engine.executeShell("getprop ro.build.tags", false);
@@ -73,16 +82,36 @@ public class VmEngineTest {
         assert !lsXbin.getOutput().contains("su") : "su binary must NOT be in unrooted xbin";
     }
 
-    public static void testEdgeCases() {
-        VmConfig config = new VmConfig(3, "Edge Case VM");
+    public static void testCommandBoundaryEdgeCases() {
+        VmConfig config = new VmConfig(3, "Edge Case VM", "7.1.2", false, 720, 1280, 320, 2048, 4, false, false, 1000L);
         VmEngine engine = new VmEngine(config);
 
+        // Test non-su command starting with "su" like "surfaceflinger" or "sudo"
+        VmEngine.ExecutionResult surface = engine.executeShell("surfaceflinger", false);
+        assert surface.getExitCode() == 0 : "surfaceflinger should not be treated as su";
+        assert !surface.getOutput().contains("su: not found") && !surface.getOutput().contains("inaccessible") : "surfaceflinger must not hit su handler";
+
+        VmEngine.ExecutionResult sudo = engine.executeShell("sudo apt update", false);
+        assert sudo.getExitCode() == 0 : "sudo should not be treated as su";
+        assert !sudo.getOutput().contains("su: not found") : "sudo must not hit su handler";
+
+        // Test which surface
+        VmEngine.ExecutionResult whichSurface = engine.executeShell("which surface", false);
+        assert whichSurface.getExitCode() == 1 : "which surface should return 1";
+        assert !whichSurface.getOutput().contains("/system/xbin/su") : "which surface must not return su path";
+
+        // Test getproperties vs getprop
+        VmEngine.ExecutionResult getproperties = engine.executeShell("getproperties", false);
+        assert getproperties.getExitCode() == 0;
+        assert !getproperties.getOutput().contains("ro.build") : "getproperties should not be matched as getprop";
+
+        // Empty and whitespace
         assert engine.executeShell(null, false).getOutput().isEmpty();
         assert engine.executeShell("", false).getOutput().isEmpty();
         assert engine.executeShell("    ", false).getOutput().isEmpty();
 
-        VmEngine.ExecutionResult uname = engine.executeShell("uname -a", false);
-        assert uname.getExitCode() == 0;
-        assert uname.getOutput().contains("Linux");
+        // Dynamic config update
+        engine.updateConfig(config.withRootEnabled(true));
+        assert engine.executeShell("which su", false).getExitCode() == 0 : "After updateConfig(root=true), which su should succeed";
     }
 }

@@ -62,13 +62,38 @@ public class SuPolicyManager {
         return defaultPolicy;
     }
 
+    public interface SuPromptCallback {
+        boolean onRequestPrompt(String packageName, String command);
+    }
+
+    private volatile SuPromptCallback promptCallback;
+
+    public void setPromptCallback(SuPromptCallback callback) {
+        this.promptCallback = callback;
+    }
+
+    public SuPromptCallback getPromptCallback() {
+        return promptCallback;
+    }
+
     public boolean checkAndLogRequest(String packageName, String command, boolean isRootEnabled) {
         if (!isRootEnabled) {
             log(packageName, command, false);
             return false;
         }
         Policy policy = getPolicy(packageName);
-        boolean granted = (policy == Policy.ALLOW || policy == Policy.PROMPT);
+        boolean granted = false;
+        if (policy == Policy.ALLOW) {
+            granted = true;
+        } else if (policy == Policy.DENY) {
+            granted = false;
+        } else if (policy == Policy.PROMPT) {
+            if (promptCallback != null) {
+                granted = promptCallback.onRequestPrompt(packageName, command);
+            } else {
+                granted = true; // Permissive fallback when interactive UI prompt handler is unset
+            }
+        }
         log(packageName, command, granted);
         return granted;
     }

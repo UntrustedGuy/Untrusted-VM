@@ -28,7 +28,22 @@ public class SuPolicyManagerTest {
         boolean badAppDenied = manager.checkAndLogRequest("com.unknown.bad", "su", true);
         assert !badAppDenied : "Bad app request should be denied";
 
-        assert manager.getLogs().size() == 3 : "Should have 3 log entries";
+        // Interactive prompt callback
+        manager.setPolicy("com.prompt.app", SuPolicyManager.Policy.PROMPT);
+        manager.setPromptCallback(new SuPolicyManager.SuPromptCallback() {
+            @Override
+            public boolean onRequestPrompt(String pkg, String cmd) {
+                return pkg.equals("com.prompt.app") && cmd.equals("id");
+            }
+        });
+
+        boolean promptApproved = manager.checkAndLogRequest("com.prompt.app", "id", true);
+        assert promptApproved : "Prompt should be approved for id";
+
+        boolean promptRejected = manager.checkAndLogRequest("com.prompt.app", "rm -rf /", true);
+        assert !promptRejected : "Prompt should be rejected for rm -rf";
+
+        assert manager.getLogs().size() == 5 : "Should have 5 log entries";
 
         manager.clearLogs();
         assert manager.getLogs().isEmpty() : "Logs should be cleared";
