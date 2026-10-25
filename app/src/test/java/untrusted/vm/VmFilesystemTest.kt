@@ -16,7 +16,7 @@ class VmFilesystemTest {
     @Before
     fun setUp() {
         tempDir = Files.createTempDirectory("untrusted_fs_test_").toFile()
-        filesystem = VmFilesystem(vmId = 1, rootDir = tempDir)
+        filesystem = VmFilesystem(1, tempDir)
     }
 
     @After

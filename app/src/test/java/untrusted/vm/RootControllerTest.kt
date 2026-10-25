@@ -16,7 +16,7 @@ class RootControllerTest {
     @Before
     fun setUp() {
         tempDir = Files.createTempDirectory("untrusted_vm_test_").toFile()
-        rootController = RootController(vmId = 1, vmRootDir = tempDir)
+        rootController = RootController(1, tempDir)
     }
 
     @After
@@ -79,16 +79,16 @@ class RootControllerTest {
     fun testCommandExecutionWithRootEnabledVsDisabled() {
         // When root is disabled
         rootController.setRootState(false)
-        val denied = rootController.executeGuestCommand("id", asRoot = true)
+        val denied = rootController.executeGuestCommand("id", true)
         assertTrue(denied.contains("Error: Root is disabled"))
 
         // When root is enabled
         rootController.setRootState(true)
-        val rootOut = rootController.executeGuestCommand("id", asRoot = true)
+        val rootOut = rootController.executeGuestCommand("id", true)
         assertTrue(rootOut.contains("uid=0(root)"))
 
         // Non-root command
-        val userOut = rootController.executeGuestCommand("id", asRoot = false)
+        val userOut = rootController.executeGuestCommand("id", false)
         assertTrue(userOut.contains("uid=10100(u0_a100)"))
     }
 }

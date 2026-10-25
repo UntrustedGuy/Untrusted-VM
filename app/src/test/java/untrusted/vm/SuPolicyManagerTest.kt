@@ -11,7 +11,7 @@ class SuPolicyManagerTest {
 
     @Before
     fun setUp() {
-        policyManager = SuPolicyManager(vmId = 1)
+        policyManager = SuPolicyManager(1)
     }
 
     @Test
@@ -28,13 +28,13 @@ class SuPolicyManagerTest {
     @Test
     fun testRootDisabledBlocksAllRequests() {
         policyManager.setPolicy("com.example.app", SuPolicyManager.Policy.ALLOW)
-        val granted = policyManager.checkAndLogRequest("com.example.app", "id", isRootEnabled = false)
+        val granted = policyManager.checkAndLogRequest("com.example.app", "id", false)
         assertFalse(granted)
 
         val logs = policyManager.getLogs()
         assertEquals(1, logs.size)
         assertEquals("com.example.app", logs[0].packageName)
-        assertFalse(logs[0].granted)
+        assertFalse(logs[0].isGranted)
     }
 
     @Test
@@ -42,15 +42,15 @@ class SuPolicyManagerTest {
         policyManager.setPolicy("com.allowed.app", SuPolicyManager.Policy.ALLOW)
         policyManager.setPolicy("com.denied.app", SuPolicyManager.Policy.DENY)
 
-        val allowed = policyManager.checkAndLogRequest("com.allowed.app", "whoami", isRootEnabled = true)
-        val denied = policyManager.checkAndLogRequest("com.denied.app", "reboot", isRootEnabled = true)
+        val allowed = policyManager.checkAndLogRequest("com.allowed.app", "whoami", true)
+        val denied = policyManager.checkAndLogRequest("com.denied.app", "reboot", true)
 
         assertTrue(allowed)
         assertFalse(denied)
 
         val logs = policyManager.getLogs()
         assertEquals(2, logs.size)
-        assertTrue(logs[0].granted)
-        assertFalse(logs[1].granted)
+        assertTrue(logs[0].isGranted)
+        assertFalse(logs[1].isGranted)
     }
 }

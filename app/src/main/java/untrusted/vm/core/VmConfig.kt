@@ -49,10 +49,11 @@ data class VmConfig @JvmOverloads constructor(
         @JvmStatic
         fun fromJson(jsonStr: String): VmConfig {
             val json = JSONObject(jsonStr)
-            val id = json.getInt("id")
+            val id = json.optInt("id", 1)
+            val name = json.optString("name", "VM $id")
             return VmConfig(
                 id = id,
-                name = json.optString("name", "Untrusted VM $id"),
+                name = name,
                 androidVersion = json.optString("androidVersion", "7.1.2"),
                 isRootEnabled = json.optBoolean("isRootEnabled", false),
                 resolutionWidth = json.optInt("resolutionWidth", 720),
