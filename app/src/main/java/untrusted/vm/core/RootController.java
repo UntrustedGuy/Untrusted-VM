@@ -1,24 +1,37 @@
 package untrusted.vm.core;
 
+import android.content.Context;
+import android.util.Log;
+import untrusted.vm.core.RootOverlayProvider;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Controller responsible for per-instance simulated root management.
+ * Controller responsible for per-instance real root provisioning in the guest rootfs.
  * Mirrors VMOS Pro's root toggle mechanism:
- * - Operates entirely in userspace without requiring host root or Shizuku.
- * - Injects or removes guest `su` binaries and su daemon bridges in the instance rootfs.
- * - Alters guest system properties (ro.build.tags, ro.debuggable, ro.secure).
+ * - Provisions /system/xbin/su, /system/xbin/daemonsu, /system/bin/su into the guest rootfs.
+ * - Updates guest build.prop with rooted properties (ro.secure=0, ro.debuggable=1, test-keys).
+ * - Starts daemonsu UNIX socket daemon for per-app root requests.
+ * - Runs entirely in userspace on a non-rooted host.
  */
 public class RootController {
 
+    private static final String TAG = "UntrustedVM-RootController";
+
     private final int vmId;
     private final File vmRootDir;
+    private final Context context;
 
     public RootController(int vmId, File vmRootDir) {
+        this(vmId, vmRootDir, null);
+    }
+
+    public RootController(int vmId, File vmRootDir, Context context) {
         this.vmId = vmId;
         this.vmRootDir = vmRootDir;
+        this.context = context;
     }
 
     public File getSystemDir() {
@@ -50,12 +63,12 @@ public class RootController {
      */
     public boolean isRootActive() {
         File su = getSuBinary();
-        return su.exists() && (su.length() > 0 || su.canExecute());
+        return su.exists() && su.canExecute();
     }
 
     /**
      * Applies the requested root state for this instance.
-     * @param enable If true, provisions simulated root binaries and test-keys build.prop.
+     * @param enable If true, provisions real su + daemonsu binaries and rooted build.prop.
      *               If false, cleans up su binaries and sets secure build properties.
      */
     public synchronized boolean setRootState(boolean enable) {
@@ -64,104 +77,70 @@ public class RootController {
 
     private boolean installGuestRoot() {
         try {
-            File xbin = getXbinDir();
-            if (!xbin.exists()) {
-                xbin.mkdirs();
-            }
-            File bin = getBinDir();
-            if (!bin.exists()) {
-                bin.mkdirs();
+            if (context == null) {
+                Log.w(TAG, "No Context available; cannot provision root overlay assets for VM #" + vmId);
+                return false;
             }
 
-            String suScript =
-                "#!/system/bin/sh\n" +
-                "# Untrusted VM - Simulated Guest Superuser Binary\n" +
-                "# Host UID: non-root unprivileged container\n" +
-                "# Guest UID: 0 (root)\n\n" +
-                "export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:$PATH\n" +
-                "export USER=root\n" +
-                "export HOME=/root\n" +
-                "export SHELL=/system/bin/sh\n\n" +
-                "if [ \"$1\" = \"-v\" ] || [ \"$1\" = \"-V\" ]; then\n" +
-                "    echo \"UntrustedVM-su v1.0 (VMOS-compatible)\"\n" +
-                "    exit 0\n" +
-                "fi\n\n" +
-                "if [ \"$1\" = \"-c\" ]; then\n" +
-                "    shift\n" +
-                "    exec /system/bin/sh -c \"$@\"\n" +
-                "fi\n\n" +
-                "if [ -n \"$1\" ]; then\n" +
-                "    exec /system/bin/sh -c \"$*\"\n" +
-                "else\n" +
-                "    exec /system/bin/sh\n" +
-                "fi\n";
+            File rootfsDir = new File(vmRootDir, "rootfs");
 
+            // Provision the full root overlay (su, daemonsu, build.prop, etc.)
+            boolean ok = RootOverlayProvider.provisionRootOverlay(
+                    context,
+                    rootfsDir,
+                    vmId,
+                    getAndroidVersion()
+            );
+            if (!ok) {
+                return false;
+            }
+
+            // Ensure the su binary is executable
             File su = getSuBinary();
-            try (FileOutputStream fos = new FileOutputStream(su)) {
-                fos.write(suScript.getBytes(StandardCharsets.UTF_8));
-            }
             su.setExecutable(true, false);
             su.setReadable(true, false);
 
-            File daemonsu = getSuDaemon();
-            try (FileOutputStream fos = new FileOutputStream(daemonsu)) {
-                fos.write(suScript.getBytes(StandardCharsets.UTF_8));
-            }
-            daemonsu.setExecutable(true, false);
-            daemonsu.setReadable(true, false);
+            File daemon = getSuDaemon();
+            daemon.setExecutable(true, false);
+            daemon.setReadable(true, false);
 
-            updateBuildProp(true);
+            Log.i(TAG, "Guest root installed for VM #" + vmId);
             return true;
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to install guest root for VM #" + vmId, e);
             return false;
         }
     }
 
     private boolean removeGuestRoot() {
         try {
-            File su = getSuBinary();
-            if (su.exists()) {
-                su.delete();
+            File rootfsDir = new File(vmRootDir, "rootfs");
+            boolean ok = RootOverlayProvider.removeRootOverlay(rootfsDir);
+            if (!ok) {
+                return false;
             }
-            File daemonsu = getSuDaemon();
-            if (daemonsu.exists()) {
-                daemonsu.delete();
-            }
-            updateBuildProp(false);
+            Log.i(TAG, "Guest root removed for VM #" + vmId);
             return true;
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to remove guest root for VM #" + vmId, e);
             return false;
         }
     }
 
-    private void updateBuildProp(boolean rooted) {
-        File system = getSystemDir();
-        if (!system.exists()) {
-            system.mkdirs();
+    private String getAndroidVersion() {
+        // Try to read from existing build.prop
+        File buildProp = getBuildProp();
+        if (buildProp.exists()) {
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(buildProp.toPath());
+                for (String line : lines) {
+                    if (line.startsWith("ro.build.version.release=")) {
+                        return line.substring("ro.build.version.release=".length()).trim();
+                    }
+                }
+            } catch (Exception ignored) {}
         }
-        String content = rooted ?
-            "# Untrusted VM build.prop (Rooted Profile)\n" +
-            "ro.build.type=userdebug\n" +
-            "ro.build.tags=test-keys\n" +
-            "ro.debuggable=1\n" +
-            "ro.secure=0\n" +
-            "ro.vm.id=" + vmId + "\n" +
-            "ro.vm.root=1\n" :
-            "# Untrusted VM build.prop (Clean Profile)\n" +
-            "ro.build.type=user\n" +
-            "ro.build.tags=release-keys\n" +
-            "ro.debuggable=0\n" +
-            "ro.secure=1\n" +
-            "ro.vm.id=" + vmId + "\n" +
-            "ro.vm.root=0\n";
-
-        try (FileOutputStream fos = new FileOutputStream(getBuildProp())) {
-            fos.write(content.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        return "7.1.2";
     }
 
     public String executeGuestCommand(String command, boolean asRoot) {

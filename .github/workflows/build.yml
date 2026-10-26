@@ -25,17 +25,16 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Accept Android SDK Licenses & Configure Environment
-        run: |
-          mkdir -p "$ANDROID_HOME/licenses"
-          printf "8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
-          printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          printf "edee783fc3433525866f85c52918eb9cb8147cb9\n" > "$ANDROID_HOME/licenses/android-googletv-license"
-          printf "e9acab587f6c49492d4b6660dee43c3d3237e7d3\n" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
-          printf "252b411d3d7406daf0721e1a53907e5e3427be5d\n" > "$ANDROID_HOME/licenses/google-gdk-license"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk: 26.1.10909125
+          cmake: 3.22.1
+          build-tools: 34.0.0
+
+      - name: Accept Android SDK Licenses
+        run: yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --licenses
 
       - name: Grant Execute Permission to Gradle Wrapper
         run: chmod +x gradlew

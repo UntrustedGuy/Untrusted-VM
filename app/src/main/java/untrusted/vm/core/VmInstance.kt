@@ -18,7 +18,7 @@ class VmInstance(
 ) {
     val id: Int = initialConfig.id
     val filesystem = VmFilesystem(id, File(baseStorageDir, "instances/vm_$id"))
-    val rootController = RootController(id, filesystem.rootDir)
+    val rootController = RootController(id, filesystem.rootDir, appContext)
     val suPolicyManager = SuPolicyManager(id)
     val engine = VmEngine(initialConfig)
     val fileTransferStation = FileTransferStation(filesystem)
@@ -54,6 +54,17 @@ class VmInstance(
             initialConfig.resolutionWidth,
             initialConfig.resolutionHeight
         )
+        // Set LD_PRELOAD path for uid spoofing (libvm_preload.so) when root is enabled.
+        if (initialConfig.isRootEnabled && appContext != null) {
+            val nativeDir = appContext.nativeLibraryDir
+            if (nativeDir != null) {
+                val preloadLib = File(nativeDir, "libvm_preload.so")
+                if (preloadLib.exists()) {
+                    engine.setPreloadPath(preloadLib.absolutePath)
+                    appendLog("LD_PRELOAD set to ${preloadLib.absolutePath} for VM #$id")
+                }
+            }
+        }
         // Synchronize initial root state with config
         rootController.setRootState(initialConfig.isRootEnabled)
         engine.syncNativeRootOption()
@@ -102,17 +113,38 @@ class VmInstance(
         rootController.setRootState(_config.value.isRootEnabled)
         engine.syncNativeRootOption()
 
+        // Refresh LD_PRELOAD path when root is enabled (in case toggled after init).
+        if (_config.value.isRootEnabled && appContext != null) {
+            val nativeDir = appContext.nativeLibraryDir
+            if (nativeDir != null) {
+                val preloadLib = File(nativeDir, "libvm_preload.so")
+                if (preloadLib.exists()) {
+                    engine.setPreloadPath(preloadLib.absolutePath)
+                }
+            }
+        }
+
+        // Start su-daemon (daemonsu) for per-app root requests when root is enabled.
+        // This mirrors VMOS Pro's su daemon that listens on a UNIX domain socket.
+        if (_config.value.isRootEnabled && RootOverlayProvider.isRootInstalled(filesystem.rootfsDir)) {
+            val socketPath = RootOverlayProvider.suSocketPath(id)
+            val daemonStart = "nohup /system/xbin/daemonsu >/dev/null 2>&1 &"
+            val res = engine.executeShell(daemonStart, true)
+            appendLog("su-daemon started for VM #$id (socket=$socketPath): ${res.output.trim()}")
+        } else if (_config.value.isRootEnabled) {
+            appendLog("Root enabled but overlay not installed; su binary unavailable for VM #$id.")
+        }
+
         // Start Hardware subsystems
         halBoxManager?.start()
         audioBridge?.start()
         networkManager.startAdbBridge(5555)
 
         appendLog("Guest filesystem mounted: ${filesystem.rootfsDir.absolutePath}")
-        appendLog("Simulated root: ${if (_config.value.isRootEnabled) "ACTIVE (/system/xbin/su ready)" else "DISABLED"}")
+        appendLog("Guest root: ${if (_config.value.isRootEnabled) "ACTIVE (/system/xbin/su + daemonsu)" else "DISABLED"}")
         _state.value = VmState.RUNNING
         appendLog("Untrusted VM #$id is now RUNNING.")
         return true
-    }
 
     /**
      * Stops the virtual machine container.

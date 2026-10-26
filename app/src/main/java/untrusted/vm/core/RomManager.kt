@@ -170,6 +170,22 @@ class RomManager(private val context: Context) {
                 .withAndroidVersion(rom.androidVersion.ifBlank { instance.config.value.androidVersion })
                 .withBaseRom(rom.id)
         )
+
+        // If the instance has root enabled, provision the root overlay into the newly applied ROM.
+        if (instance.config.value.isRootEnabled) {
+            onStage("Provisioning guest root", 0.9f)
+            val rootOk = RootOverlayProvider.provisionRootOverlay(
+                context,
+                instance.filesystem.rootfsDir,
+                instance.id,
+                rom.androidVersion.ifBlank { instance.config.value.androidVersion }
+            )
+            if (!rootOk) {
+                onStage("Root provisioning failed", 1f)
+                return "ROM applied but guest root provisioning failed."
+            }
+        }
+
         return null
     }
 }

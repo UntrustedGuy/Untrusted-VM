@@ -47,7 +47,7 @@ abstract class BaseVmService : Service() {
                 fs.initializeSkeleton()
                 this@BaseVmService.vmFilesystem = fs
 
-                val rc = RootController(config.id, fs.rootDir)
+                val rc = RootController(config.id, fs.rootDir, this@BaseVmService)
                 rc.setRootState(config.isRootEnabled)
                 this@BaseVmService.rootController = rc
 
