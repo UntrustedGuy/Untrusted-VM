@@ -145,6 +145,7 @@ class VmInstance(
         _state.value = VmState.RUNNING
         appendLog("Untrusted VM #$id is now RUNNING.")
         return true
+    }
 
     /**
      * Stops the virtual machine container.

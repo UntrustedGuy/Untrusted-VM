@@ -12,7 +12,7 @@ import java.io.InputStream
  * This is the VMOS Pro equivalent: when [isRootEnabled] is true, the guest gets:
  * - /system/xbin/su — setuid superuser binary (guest processes see UID 0)
  * - /system/xbin/daemonsu — UNIX domain socket daemon for per-app root requests
- * - /system/bin/su — compatibility symlink/copy
+ * - /system/bin/su — compatibility copy
  * - /system/etc/install-recovery.sh — post-install hook
  * - /system/build.prop — rooted properties (ro.secure=0, ro.debuggable=1, test-keys)
  *
@@ -158,10 +158,11 @@ object RootOverlayProvider {
 
     // ------------------------------------------------------------------
     // Inline script builders (fallback when no asset ZIP is bundled)
-    // All shell $ variables are escaped as \$ to avoid Kotlin string template interpolation.
+    // Shell $ variables use ${'$'} to produce a literal $ without Kotlin template interpolation.
     // ------------------------------------------------------------------
 
     private fun buildSuScript(vmId: Int): String {
+        val D = "${'$'}"
         return """#!/system/bin/sh
 # Untrusted VM - Guest Superuser Binary (su)
 # VM ID: $vmId
@@ -172,7 +173,7 @@ object RootOverlayProvider {
 
 SU_SOCKET="/data/local/tmp/untrusted_vm_su_$vmId.sock"
 
-export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:/system/sbin:\$PATH
+export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:/system/sbin:${D}PATH
 export USER=root
 export HOME=/root
 export SHELL=/system/bin/sh
@@ -180,22 +181,22 @@ export ANDROID_ROOT=/system
 export ANDROID_DATA=/data
 export LD_PRELOAD=/system/lib/libvm_preload.so
 
-if [ "\$1" = "-v" ] || [ "\$1" = "-V" ]; then
+if [ "${D}1" = "-v" ] || [ "${D}1" = "-V" ]; then
     echo "UntrustedVM-su v2.0 (VMOS-compatible)"
     echo "VM ID: $vmId"
     exit 0
 fi
 
 # Notify su-daemon of the request (best-effort; daemon may not be running)
-if [ -S "\$SU_SOCKET" ]; then
-    echo "su_request $vmId \$UID \$*" > "\$SU_SOCKET" 2>/dev/null &
+if [ -S "${D}SU_SOCKET" ]; then
+    echo "su_request $vmId ${D}UID ${D}* > "${D}SU_SOCKET" 2>/dev/null &
 fi
 
-if [ "\$1" = "-c" ]; then
+if [ "${D}1" = "-c" ]; then
     shift
-    exec /system/bin/sh -c "\$*"
-elif [ -n "\$1" ]; then
-    exec /system/bin/sh -c "\$*"
+    exec /system/bin/sh -c "${D}*"
+elif [ -n "${D}1" ]; then
+    exec /system/bin/sh -c "${D}*"
 else
     exec /system/bin/sh
 fi
@@ -203,6 +204,7 @@ fi
     }
 
     private fun buildDaemonSuScript(vmId: Int): String {
+        val D = "${'$'}"
         return """#!/system/bin/sh
 # Untrusted VM - daemonsu (Superuser Daemon)
 # VM ID: $vmId
@@ -212,7 +214,7 @@ fi
 SU_SOCKET="/data/local/tmp/untrusted_vm_su_$vmId.sock"
 POLICY_FILE="/data/untrusted_vm_su_policy_$vmId.json"
 
-rm -f "\$SU_SOCKET"
+rm -f "${D}SU_SOCKET"
 
 # Ensure /data exists
 mkdir -p /data
@@ -221,15 +223,15 @@ mkdir -p /data
 DEFAULT_POLICY="ALLOW"
 
 check_policy() {
-    local pkg="\$1"
-    local cmd="\$2"
+    local pkg="${D}1"
+    local cmd="${D}2"
     # If a policy file exists, consult it
-    if [ -f "\$POLICY_FILE" ]; then
+    if [ -f "${D}POLICY_FILE" ]; then
         local entry
-        entry=$(grep "\"$pkg\"" "\$POLICY_FILE" 2>/dev/null | head -1)
-        if [ -n "\$entry" ]; then
-            echo "\$entry" | grep -q '"ALLOW"' && return 0
-            echo "\$entry" | grep -q '"DENY"' && return 1
+        entry=$(grep "\"$vmId\"" "${D}POLICY_FILE" 2>/dev/null | head -1)
+        if [ -n "${D}entry" ]; then
+            echo "${D}entry" | grep -q '"ALLOW"' && return 0
+            echo "${D}entry" | grep -q '"DENY"' && return 1
         fi
     fi
     # Default: allow (permissive)
@@ -237,12 +239,12 @@ check_policy() {
 }
 
 log_request() {
-    local pkg="\$1"
-    local cmd="\$2"
-    local granted="\$3"
+    local pkg="${D}1"
+    local cmd="${D}2"
+    local granted="${D}3"
     local ts
     ts=$(date +%s)
-    echo "{\"ts\":\$ts,\"pkg\":\"\$pkg\",\"cmd\":\"\$cmd\",\"granted\":\$granted}" >> "/data/untrusted_vm_su_log_$vmId.log" 2>/dev/null
+    echo "{\"ts\":${D}ts,\"pkg\":\"${D}pkg\",\"cmd\":\"${D}cmd\",\"granted\":${D}granted}" >> "/data/untrusted_vm_su_log_$vmId.log" 2>/dev/null
 }
 
 # Main daemon loop
@@ -250,16 +252,16 @@ while true; do
     # Accept a connection on the socket
     # (Using nc if available, otherwise a simple read loop)
     if command -v nc >/dev/null 2>&1; then
-        echo "REQUEST" | nc -l -U "\$SU_SOCKET" 2>/dev/null | while read -r line; do
-            set -- \$line
+        echo "REQUEST" | nc -l -U "${D}SU_SOCKET" 2>/dev/null | while read -r line; do
+            set -- ${D}line
             # Expected format: su_request <vmId> <uid> <package> <command>
-            local pkg="\${3:-unknown}"
-            local cmd="\${4:-shell}"
-            if check_policy "\$pkg" "\$cmd"; then
-                log_request "\$pkg" "\$cmd" 1
+            local pkg="${D}{3:-unknown}"
+            local cmd="${D}{4:-shell}"
+            if check_policy "${D}pkg" "${D}cmd"; then
+                log_request "${D}pkg" "${D}cmd" 1
                 echo "GRANTED"
             else
-                log_request "\$pkg" "\$cmd" 0
+                log_request "${D}pkg" "${D}cmd" 0
                 echo "DENIED"
             fi
         done
