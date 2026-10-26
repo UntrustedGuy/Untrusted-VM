@@ -14,7 +14,7 @@ import java.io.File
 class VmInstance(
     initialConfig: VmConfig,
     baseStorageDir: File,
-    appContext: Context? = null
+    val appContext: Context? = null
 ) {
     val id: Int = initialConfig.id
     val filesystem = VmFilesystem(id, File(baseStorageDir, "instances/vm_$id"))
