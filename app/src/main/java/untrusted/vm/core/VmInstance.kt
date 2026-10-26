@@ -56,9 +56,9 @@ class VmInstance(
         )
         // Set LD_PRELOAD path for uid spoofing (libvm_preload.so) when root is enabled.
         if (initialConfig.isRootEnabled && appContext != null) {
-            val nativeDir = appContext.nativeLibraryDir
+            val nativeDir = appContext.applicationInfo.nativeLibraryDir
             if (nativeDir != null) {
-                val preloadLib = File(nativeDir, "libvm_preload.so")
+                val preloadLib = File("$nativeDir/libvm_preload.so")
                 if (preloadLib.exists()) {
                     engine.setPreloadPath(preloadLib.absolutePath)
                     appendLog("LD_PRELOAD set to ${preloadLib.absolutePath} for VM #$id")
@@ -115,9 +115,9 @@ class VmInstance(
 
         // Refresh LD_PRELOAD path when root is enabled (in case toggled after init).
         if (_config.value.isRootEnabled && appContext != null) {
-            val nativeDir = appContext.nativeLibraryDir
+            val nativeDir = appContext.applicationInfo.nativeLibraryDir
             if (nativeDir != null) {
-                val preloadLib = File(nativeDir, "libvm_preload.so")
+                val preloadLib = File("$nativeDir/libvm_preload.so")
                 if (preloadLib.exists()) {
                     engine.setPreloadPath(preloadLib.absolutePath)
                 }

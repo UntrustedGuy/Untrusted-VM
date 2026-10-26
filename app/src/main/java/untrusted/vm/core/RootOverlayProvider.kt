@@ -1,7 +1,6 @@
 package untrusted.vm.core
 
 import android.content.Context
-import android.content.res.AssetManager
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -159,6 +158,7 @@ object RootOverlayProvider {
 
     // ------------------------------------------------------------------
     // Inline script builders (fallback when no asset ZIP is bundled)
+    // All shell $ variables are escaped as \$ to avoid Kotlin string template interpolation.
     // ------------------------------------------------------------------
 
     private fun buildSuScript(vmId: Int): String {
@@ -172,7 +172,7 @@ object RootOverlayProvider {
 
 SU_SOCKET="/data/local/tmp/untrusted_vm_su_$vmId.sock"
 
-export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:/system/sbin:$PATH
+export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:/system/sbin:\$PATH
 export USER=root
 export HOME=/root
 export SHELL=/system/bin/sh
@@ -180,22 +180,22 @@ export ANDROID_ROOT=/system
 export ANDROID_DATA=/data
 export LD_PRELOAD=/system/lib/libvm_preload.so
 
-if [ "$1" = "-v" ] || [ "$1" = "-V" ]; then
+if [ "\$1" = "-v" ] || [ "\$1" = "-V" ]; then
     echo "UntrustedVM-su v2.0 (VMOS-compatible)"
-    echo "VM ID: $vmid"
+    echo "VM ID: $vmId"
     exit 0
 fi
 
 # Notify su-daemon of the request (best-effort; daemon may not be running)
-if [ -S "$SU_SOCKET" ]; then
-    echo "su_request $vmid $UID $*" > "$SU_SOCKET" 2>/dev/null &
+if [ -S "\$SU_SOCKET" ]; then
+    echo "su_request $vmId \$UID \$*" > "\$SU_SOCKET" 2>/dev/null &
 fi
 
-if [ "$1" = "-c" ]; then
+if [ "\$1" = "-c" ]; then
     shift
-    exec /system/bin/sh -c "$*"
-elif [ -n "$1" ]; then
-    exec /system/bin/sh -c "$*"
+    exec /system/bin/sh -c "\$*"
+elif [ -n "\$1" ]; then
+    exec /system/bin/sh -c "\$*"
 else
     exec /system/bin/sh
 fi
@@ -205,14 +205,14 @@ fi
     private fun buildDaemonSuScript(vmId: Int): String {
         return """#!/system/bin/sh
 # Untrusted VM - daemonsu (Superuser Daemon)
-# VM ID: $vmid
+# VM ID: $vmId
 # Listens on a UNIX domain socket for su requests from guest apps.
 # Applies per-app policy (ALLOW/DENY/PROMPT) and grants root context.
 
 SU_SOCKET="/data/local/tmp/untrusted_vm_su_$vmId.sock"
-POLICY_FILE="/data/untrusted_vm_su_policy_$vmid.json"
+POLICY_FILE="/data/untrusted_vm_su_policy_$vmId.json"
 
-rm -f "$SU_SOCKET"
+rm -f "\$SU_SOCKET"
 
 # Ensure /data exists
 mkdir -p /data
@@ -221,15 +221,15 @@ mkdir -p /data
 DEFAULT_POLICY="ALLOW"
 
 check_policy() {
-    local pkg="$1"
-    local cmd="$2"
+    local pkg="\$1"
+    local cmd="\$2"
     # If a policy file exists, consult it
-    if [ -f "$POLICY_FILE" ]; then
+    if [ -f "\$POLICY_FILE" ]; then
         local entry
-        entry=$(grep "\"$pkg\"" "$POLICY_FILE" 2>/dev/null | head -1)
-        if [ -n "$entry" ]; then
-            echo "$entry" | grep -q '"ALLOW"' && return 0
-            echo "$entry" | grep -q '"DENY"' && return 1
+        entry=$(grep "\"$pkg\"" "\$POLICY_FILE" 2>/dev/null | head -1)
+        if [ -n "\$entry" ]; then
+            echo "\$entry" | grep -q '"ALLOW"' && return 0
+            echo "\$entry" | grep -q '"DENY"' && return 1
         fi
     fi
     # Default: allow (permissive)
@@ -237,12 +237,12 @@ check_policy() {
 }
 
 log_request() {
-    local pkg="$1"
-    local cmd="$2"
-    local granted="$3"
+    local pkg="\$1"
+    local cmd="\$2"
+    local granted="\$3"
     local ts
     ts=$(date +%s)
-    echo "{\"ts\":$ts,\"pkg\":\"$pkg\",\"cmd\":\"$cmd\",\"granted\":$granted}" >> "/data/untrusted_vm_su_log_$vmid.log" 2>/dev/null
+    echo "{\"ts\":\$ts,\"pkg\":\"\$pkg\",\"cmd\":\"\$cmd\",\"granted\":\$granted}" >> "/data/untrusted_vm_su_log_$vmId.log" 2>/dev/null
 }
 
 # Main daemon loop
@@ -250,16 +250,16 @@ while true; do
     # Accept a connection on the socket
     # (Using nc if available, otherwise a simple read loop)
     if command -v nc >/dev/null 2>&1; then
-        echo "REQUEST" | nc -l -U "$SU_SOCKET" 2>/dev/null | while read -r line; do
-            set -- $line
+        echo "REQUEST" | nc -l -U "\$SU_SOCKET" 2>/dev/null | while read -r line; do
+            set -- \$line
             # Expected format: su_request <vmId> <uid> <package> <command>
-            local pkg="${3:-unknown}"
-            local cmd="${4:-shell}"
-            if check_policy "$pkg" "$cmd"; then
-                log_request "$pkg" "$cmd" 1
+            local pkg="\${3:-unknown}"
+            local cmd="\${4:-shell}"
+            if check_policy "\$pkg" "\$cmd"; then
+                log_request "\$pkg" "\$cmd" 1
                 echo "GRANTED"
             else
-                log_request "$pkg" "$cmd" 0
+                log_request "\$pkg" "\$cmd" 0
                 echo "DENIED"
             fi
         done
@@ -275,7 +275,7 @@ done
         return """#!/system/bin/sh
 # Untrusted VM - install-recovery.sh
 # Post-install hook executed after root overlay provisioning.
-# VM ID: $vmid
+# VM ID: $vmId
 
 # Set proper ownership and permissions on root binaries
 chmod 0755 /system/xbin/su 2>/dev/null
@@ -288,7 +288,7 @@ mkdir -p /data/app 2>/dev/null
 mkdir -p /data/data 2>/dev/null
 
 # Start daemonsu if not already running
-if [ ! -S "/data/local/tmp/untrusted_vm_su_$vmid.sock" ]; then
+if [ ! -S "/data/local/tmp/untrusted_vm_su_$vmId.sock" ]; then
     nohup /system/xbin/daemonsu >/dev/null 2>&1 &
 fi
 
@@ -298,7 +298,7 @@ exit 0
 
     private fun buildRootedBuildProp(vmId: Int, androidVersion: String): String {
         return """# Untrusted VM build.prop (Rooted Profile)
-# Provided by RootOverlayProvider for VM #$vmid
+# Provided by RootOverlayProvider for VM #$vmId
 ro.build.version.release=$androidVersion
 ro.build.version.sdk=25
 ro.build.type=userdebug
@@ -306,8 +306,8 @@ ro.build.tags=test-keys
 ro.build.debuggable=1
 ro.debuggable=1
 ro.secure=0
-ro.vm.id=$vmid
-ro.vm.name=Untrusted VM $vmid
+ro.vm.id=$vmId
+ro.vm.name=Untrusted VM $vmId
 ro.vm.root=1
 ro.vm.root.enabled=1
 ro.adb.secure=0
@@ -327,7 +327,7 @@ ro.baseband=unknown
 ro.ril.oem.encryption.type=none
 gsm.sim.operator.alpha=Untrusted VM
 gsm.sim.operator.numeric=000000
-net.hostname=untrusted-vm-$vmid
+net.hostname=untrusted-vm-$vmId
 persist.sys.timezone=UTC
 persist.sys.locale=en-US
 """.trimIndent()
