@@ -26,15 +26,19 @@ jobs:
           cache: 'gradle'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          api-level: 34
-          ndk: 26.1.10909125
-          cmake: 3.22.1
-          build-tools: 34.0.0
+        run: |
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_PATH
+          echo "${ANDROID_HOME}/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
 
       - name: Accept Android SDK Licenses
-        run: yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --licenses
+        run: yes | sdkmanager --licenses
+
+      - name: Install Android SDK Components
+        run: |
+          sdkmanager --update
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
 
       - name: Grant Execute Permission to Gradle Wrapper
         run: chmod +x gradlew
