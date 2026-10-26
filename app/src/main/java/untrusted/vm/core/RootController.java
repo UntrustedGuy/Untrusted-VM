@@ -77,22 +77,23 @@ public class RootController {
 
     private boolean installGuestRoot() {
         try {
-            if (context == null) {
-                Log.w(TAG, "No Context available; cannot provision root overlay assets for VM #" + vmId);
-                return false;
-            }
-
             File rootfsDir = new File(vmRootDir, "rootfs");
 
-            // Provision the full root overlay (su, daemonsu, build.prop, etc.)
-            boolean ok = RootOverlayProvider.provisionRootOverlay(
-                    context,
-                    rootfsDir,
-                    vmId,
-                    getAndroidVersion()
-            );
-            if (!ok) {
-                return false;
+            if (context != null) {
+                // Provision the full root overlay (su, daemonsu, build.prop, etc.)
+                boolean ok = RootOverlayProvider.provisionRootOverlay(
+                        context,
+                        rootfsDir,
+                        vmId,
+                        getAndroidVersion()
+                );
+                if (!ok) {
+                    return false;
+                }
+            } else {
+                // No Context available (e.g. unit tests): fall back to inline
+                // script-based su binaries so the guest still has a working su.
+                installInlineGuestRoot(rootfsDir);
             }
 
             // Ensure the su binary is executable
@@ -110,6 +111,56 @@ public class RootController {
             Log.e(TAG, "Failed to install guest root for VM #" + vmId, e);
             return false;
         }
+    }
+
+    /**
+     * Inline fallback that writes shell-script su/daemonsu binaries into the guest rootfs.
+     * Used when no Context is available to load root-overlay assets (e.g. unit tests).
+     */
+    private void installInlineGuestRoot(File rootfsDir) throws Exception {
+        File systemDir = File(rootfsDir, "system");
+        File xbinDir = File(systemDir, "xbin");
+        File binDir = File(systemDir, "bin");
+        xbinDir.mkdirs();
+        binDir.mkdirs();
+
+        String suScript =
+            "#!/system/bin/sh\n" +
+            "# Untrusted VM - Simulated Guest Superuser Binary\n" +
+            "export PATH=/system/xbin:/system/bin:/sbin:/vendor/bin:$PATH\n" +
+            "export USER=root\n" +
+            "export HOME=/root\n" +
+            "export SHELL=/system/bin/sh\n\n" +
+            "if [ \"$1\" = \"-v\" ] || [ \"$1\" = \"-V\" ]; then\n" +
+            "    echo \"UntrustedVM-su v1.0\"\n" +
+            "    exit 0\n" +
+            "fi\n\n" +
+            "if [ \"$1\" = \"-c\" ]; then\n" +
+            "    shift\n" +
+            "    exec /system/bin/sh -c \"$@\"\n" +
+            "fi\n\n" +
+            "if [ -n \"$1\" ]; then\n" +
+            "    exec /system/bin/sh -c \"$*\"\n" +
+            "else\n" +
+            "    exec /system/bin/sh\n" +
+            "fi\n";
+
+        File su = getSuBinary();
+        try (FileOutputStream fos = new FileOutputStream(su)) {
+            fos.write(suScript.getBytes(StandardCharsets.UTF_8));
+        }
+
+        File daemonsu = getSuDaemon();
+        try (FileOutputStream fos = new FileOutputStream(daemonsu)) {
+            fos.write(suScript.getBytes(StandardCharsets.UTF_8));
+        }
+
+        File binSu = new File(binDir, "su");
+        try (FileOutputStream fos = new FileOutputStream(binSu)) {
+            fos.write(suScript.getBytes(StandardCharsets.UTF_8));
+        }
+
+        updateBuildProp(true);
     }
 
     private boolean removeGuestRoot() {
