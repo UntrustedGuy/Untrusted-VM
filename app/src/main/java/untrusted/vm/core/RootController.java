@@ -81,7 +81,7 @@ public class RootController {
 
             if (context != null) {
                 // Provision the full root overlay (su, daemonsu, build.prop, etc.)
-                boolean ok = RootOverlayProvider.provisionRootOverlay(
+                boolean ok = RootOverlayProvider.INSTANCE.provisionRootOverlay(
                         context,
                         rootfsDir,
                         vmId,
@@ -118,9 +118,9 @@ public class RootController {
      * Used when no Context is available to load root-overlay assets (e.g. unit tests).
      */
     private void installInlineGuestRoot(File rootfsDir) throws Exception {
-        File systemDir = File(rootfsDir, "system");
-        File xbinDir = File(systemDir, "xbin");
-        File binDir = File(systemDir, "bin");
+        File systemDir = new File(rootfsDir, "system");
+        File xbinDir = new File(systemDir, "xbin");
+        File binDir = new File(systemDir, "bin");
         xbinDir.mkdirs();
         binDir.mkdirs();
 
@@ -163,10 +163,41 @@ public class RootController {
         updateBuildProp(true);
     }
 
+    /**
+     * Writes a rooted build.prop into the guest rootfs.
+     */
+    private void updateBuildProp(boolean rooted) {
+        File systemDir = new File(vmRootDir, "rootfs/system");
+        if (!systemDir.exists()) {
+            systemDir.mkdirs();
+        }
+        String content = rooted ?
+            "# Untrusted VM build.prop (Rooted Profile)\n" +
+            "ro.build.type=userdebug\n" +
+            "ro.build.tags=test-keys\n" +
+            "ro.debuggable=1\n" +
+            "ro.secure=0\n" +
+            "ro.vm.id=" + vmId + "\n" +
+            "ro.vm.root=1\n" :
+            "# Untrusted VM build.prop (Clean Profile)\n" +
+            "ro.build.type=user\n" +
+            "ro.build.tags=release-keys\n" +
+            "ro.debuggable=0\n" +
+            "ro.secure=1\n" +
+            "ro.vm.id=" + vmId + "\n" +
+            "ro.vm.root=0\n";
+
+        try (FileOutputStream fos = new FileOutputStream(getBuildProp())) {
+            fos.write(content.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to update build.prop", e);
+        }
+    }
+
     private boolean removeGuestRoot() {
         try {
             File rootfsDir = new File(vmRootDir, "rootfs");
-            boolean ok = RootOverlayProvider.removeRootOverlay(rootfsDir);
+            boolean ok = RootOverlayProvider.INSTANCE.removeRootOverlay(rootfsDir);
             if (!ok) {
                 return false;
             }
